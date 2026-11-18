@@ -1,0 +1,16 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlmodel>=0.0.22
+pydantic-settings>=2.5.0
+pydantic[email]>=2.5.0
+psycopg2-binary>=2.9.9
+psycopg[binary]>=3.2.0
+python-dotenv>=1.0.1
+alembic>=1.13.0
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.9
+google-genai>=3.3.0
+groq>=1.7.0
+openai>=1.50.0
+pytest>=8.0.0

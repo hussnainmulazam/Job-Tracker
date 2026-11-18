@@ -1,0 +1,1033 @@
+"""
+Google OAuth2, Gmail Sync, and Email Sending Service.
+Handles authorization code flow, Fernet refresh token encryption,
+scope verification, rate-limited message fetching, attachment extraction,
+Supabase storage upload, candidate ingestion, and sending emails via Gmail API.
+"""
+import base64
+import email
+from email.message import EmailMessage
+import json
+import logging
+import os
+import re
+import time
+import urllib.parse
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
+from sqlmodel import Session, select, func
+
+from app.core.config import settings
+from app.core.encryption import decrypt_token, encrypt_token
+from app.core.document_parser import parse_cv_document
+from app.core.security import create_access_token, decode_access_token
+from app.core.storage import save_candidate_cv_file
+from app.models.candidate import Candidate, CandidateStage
+from app.models.candidate_link import CandidateLink
+from app.models.email_synced import EmailSynced
+from app.models.google_account import GoogleAccount
+from app.models.job_opening import JobOpening
+from app.models.message import Message, MessageDirection, MessageType, MessageStatus
+from app.schemas.google import (
+    GmailSyncResponse,
+    GoogleAccountStatusResponse,
+    GoogleAuthUrlResponse,
+    GooglePreviewEmailRequest,
+    GooglePreviewEmailResponse,
+    GoogleSendEmailRequest,
+    GoogleSendEmailResponse,
+)
+from app.services.audit_log_service import audit_log_service
+from app.services.extractor_service import extract_all_deterministic_fields
+
+logger = logging.getLogger(__name__)
+
+# Required Google API Scopes as specified by user
+GOOGLE_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.freebusy",
+    "https://www.googleapis.com/auth/drive.file",
+]
+
+DEFAULT_GMAIL_QUERY = "has:attachment (filename:pdf OR filename:docx) newer_than:30d"
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+LOCAL_UPLOAD_DIR = Path("uploads/cvs")
+LOCAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class GoogleService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    # ── 1. OAuth2 Authorization URL ──────────────────────────────────────────
+
+    def generate_auth_url(self, user_id: uuid.UUID) -> GoogleAuthUrlResponse:
+        """
+        Builds Google OAuth2 consent screen URL with offline access
+        and prompt=consent so a refresh token is guaranteed.
+        Encodes user_id into a tamper-proof state token.
+        """
+        client_id = settings.GOOGLE_CLIENT_ID or "placeholder-google-client-id"
+        redirect_uri = settings.GOOGLE_REDIRECT_URI
+
+        # State token: signed token containing user_id
+        state = create_access_token(
+            subject=str(user_id),
+            expires_delta=timedelta(minutes=30),
+        )
+
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(GOOGLE_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": state,
+            "include_granted_scopes": "true",
+        }
+
+        auth_endpoint = settings.GOOGLE_AUTH_URI or GOOGLE_AUTH_URL
+        auth_url = f"{auth_endpoint}?{urllib.parse.urlencode(params)}"
+        return GoogleAuthUrlResponse(auth_url=auth_url, state=state)
+
+    # ── 2. Handle Callback & Token Exchange ──────────────────────────────────
+
+    def handle_callback(
+        self, code: str, state: str
+    ) -> Tuple[GoogleAccount, uuid.UUID]:
+        """
+        Exchanges authorization code for tokens, encrypts the refresh token,
+        fetches Google profile, and saves the GoogleAccount record.
+        """
+        # 1. Verify state token
+        payload = decode_access_token(state)
+        if not payload or not payload.get("sub"):
+            raise ValueError("Invalid or expired OAuth state parameter.")
+
+        user_id = uuid.UUID(payload["sub"])
+
+        client_id = settings.GOOGLE_CLIENT_ID
+        client_secret = settings.GOOGLE_CLIENT_SECRET
+        redirect_uri = settings.GOOGLE_REDIRECT_URI
+
+        # 2. Exchange authorization code for tokens
+        token_data: Dict[str, Any] = {}
+        token_endpoint = settings.GOOGLE_TOKEN_URI or GOOGLE_TOKEN_URL
+
+        if code.startswith("mock_") or code.startswith("test_"):
+            # Mock / testing authorization code
+            token_data = {
+                "access_token": f"ya29.simulated_access_{uuid.uuid4().hex[:12]}",
+                "refresh_token": f"1//simulated_refresh_{uuid.uuid4().hex[:16]}",
+                "expires_in": 3600,
+                "scope": " ".join(GOOGLE_SCOPES),
+                "id_token": "simulated_id_token",
+            }
+        elif client_id and client_secret:
+            try:
+                with httpx.Client(timeout=15.0) as client:
+                    resp = client.post(
+                        token_endpoint,
+                        data={
+                            "code": code,
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "redirect_uri": redirect_uri,
+                            "grant_type": "authorization_code",
+                        },
+                    )
+                    if not resp.is_success:
+                        logger.error("Google token exchange error: %s", resp.text)
+                        raise ValueError(f"Google token exchange failed: {resp.text}")
+                    token_data = resp.json()
+            except httpx.HTTPError as exc:
+                logger.error("HTTP error during Google token exchange: %s", exc)
+                raise ValueError(f"Failed to communicate with Google OAuth: {exc}")
+        else:
+            token_data = {
+                "access_token": f"ya29.simulated_access_{uuid.uuid4().hex[:12]}",
+                "refresh_token": f"1//simulated_refresh_{uuid.uuid4().hex[:16]}",
+                "expires_in": 3600,
+                "scope": " ".join(GOOGLE_SCOPES),
+                "id_token": "simulated_id_token",
+            }
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in", 3600)
+        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        granted_scopes = (
+            token_data.get("scope", "").split(" ")
+            if token_data.get("scope")
+            else GOOGLE_SCOPES
+        )
+
+        # 3. Fetch Google User Profile
+        google_email = "recruiter@gmail.com"
+        if not (code.startswith("mock_") or code.startswith("test_")) and access_token and client_id and client_secret:
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    user_resp = client.get(
+                        GOOGLE_USERINFO_URL,
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    if user_resp.is_success:
+                        google_email = user_resp.json().get("email", google_email)
+            except Exception as e:
+                logger.warning("Could not fetch userinfo from Google: %s", e)
+
+        # 4. Check if account already exists for user
+        account = self.session.exec(
+            select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        ).first()
+
+        encrypted_ref = encrypt_token(refresh_token) if refresh_token else ""
+
+        if account:
+            account.email = google_email
+            if refresh_token:
+                account.encrypted_refresh_token = encrypted_ref
+            account.access_token = access_token
+            account.token_expires_at = token_expires_at
+            account.scopes = granted_scopes
+            account.last_sync_status = "connected"
+            account.updated_at = datetime.now(timezone.utc)
+        else:
+            if not refresh_token:
+                encrypted_ref = encrypt_token(f"fallback_ref_{uuid.uuid4().hex}")
+
+            account = GoogleAccount(
+                user_id=user_id,
+                email=google_email,
+                encrypted_refresh_token=encrypted_ref,
+                access_token=access_token,
+                token_expires_at=token_expires_at,
+                scopes=granted_scopes,
+                sync_query=DEFAULT_GMAIL_QUERY,
+                sync_label="INBOX",
+                last_sync_status="connected",
+            )
+            self.session.add(account)
+
+        self.session.commit()
+        self.session.refresh(account)
+
+        # Audit trail entry
+        audit_log_service.record(
+            session=self.session,
+            user_id=user_id,
+            action="google_connected",
+            details=f"Connected Google account: {google_email} with offline access.",
+        )
+
+        return account, user_id
+
+    # ── 3. Token Refresh (Decryption + OAuth2 Refresh) ────────────────────────
+
+    def get_valid_access_token(self, account: GoogleAccount) -> str:
+        """
+        Ensures a fresh access token is available. If expired, decrypts
+        the Fernet encrypted refresh token and calls Google OAuth token endpoint.
+        """
+        now = datetime.now(timezone.utc)
+        if (
+            account.access_token
+            and account.token_expires_at
+            and account.token_expires_at > now + timedelta(minutes=5)
+        ):
+            return account.access_token
+
+        client_id = settings.GOOGLE_CLIENT_ID
+        client_secret = settings.GOOGLE_CLIENT_SECRET
+        if not client_id or not client_secret:
+            return account.access_token or "simulated_access_token"
+
+        # Decrypt refresh token
+        try:
+            plain_refresh = decrypt_token(account.encrypted_refresh_token)
+        except Exception:
+            plain_refresh = None
+
+        if not plain_refresh:
+            account.last_sync_status = "token_revoked"
+            self.session.add(account)
+            self.session.commit()
+            raise ValueError("No valid refresh token found. Re-authentication required.")
+
+        if "simulated" in plain_refresh or "mock" in plain_refresh:
+            return account.access_token or f"ya29.simulated_access_{uuid.uuid4().hex[:12]}"
+
+        token_endpoint = settings.GOOGLE_TOKEN_URI or GOOGLE_TOKEN_URL
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(
+                    token_endpoint,
+                    data={
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "refresh_token": plain_refresh,
+                        "grant_type": "refresh_token",
+                    },
+                )
+                if not resp.is_success:
+                    logger.error("Token refresh failed: %s", resp.text)
+                    err_msg = resp.text
+                    if "invalid_grant" in err_msg or "revoked" in err_msg or "expired" in err_msg:
+                        account.last_sync_status = "token_revoked"
+                        self.session.add(account)
+                        self.session.commit()
+                    raise ValueError(f"Failed to refresh Google access token: {resp.text}")
+
+                data = resp.json()
+                new_access_token = data["access_token"]
+                expires_in = data.get("expires_in", 3600)
+                account.access_token = new_access_token
+                account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                account.updated_at = datetime.now(timezone.utc)
+                self.session.add(account)
+                self.session.commit()
+                return new_access_token
+        except httpx.HTTPError as exc:
+            logger.error("HTTP exception during token refresh: %s", exc)
+            raise ValueError(f"Network error refreshing Google access token: {exc}")
+
+    # ── 4. Account Status & Scope Verification ───────────────────────────────
+
+    def get_status(self, user_id: uuid.UUID) -> GoogleAccountStatusResponse:
+        account = self.session.exec(
+            select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        ).first()
+
+        if not account:
+            return GoogleAccountStatusResponse(
+                is_connected=False,
+                email=None,
+                scopes=[],
+                missing_scopes=[],
+                reconnect_needed=False,
+                reconnect_reason=None,
+                last_synced_at=None,
+                last_sync_status="never",
+                sync_query=DEFAULT_GMAIL_QUERY,
+                sync_label="INBOX",
+                default_opening_id=None,
+                default_opening_title=None,
+                total_emails_synced=0,
+            )
+
+        total_synced = self.session.exec(
+            select(func.count(EmailSynced.id)).where(EmailSynced.user_id == user_id)
+        ).one()
+
+        scopes_list: list[str] = []
+        if isinstance(account.scopes, list):
+            scopes_list = account.scopes
+        elif isinstance(account.scopes, str):
+            scopes_list = [s.strip() for s in account.scopes.split(",") if s.strip()]
+
+        # Helper to normalize scope name for comparison
+        def norm(s: str) -> str:
+            return s.lower().replace("https://www.googleapis.com/auth/", "").strip()
+
+        granted_norms = {norm(s) for s in scopes_list}
+        missing_scopes: List[str] = []
+        for req in GOOGLE_SCOPES:
+            if norm(req) not in granted_norms:
+                missing_scopes.append(req)
+
+        reconnect_needed = False
+        reconnect_reason = None
+
+        if account.last_sync_status == "token_revoked":
+            reconnect_needed = True
+            reconnect_reason = "Google OAuth refresh token has expired or was revoked. Please reconnect."
+        elif missing_scopes:
+            reconnect_needed = True
+            short_names = [norm(s) for s in missing_scopes]
+            reconnect_reason = (
+                f"Missing required permissions: {', '.join(short_names)}. "
+                "Please reconnect your account to grant full access."
+            )
+
+        default_title: Optional[str] = None
+        if account.default_opening_id:
+            opening = self.session.exec(
+                select(JobOpening).where(JobOpening.id == account.default_opening_id)
+            ).first()
+            if opening:
+                default_title = opening.title
+
+        return GoogleAccountStatusResponse(
+            is_connected=True,
+            email=account.email,
+            scopes=scopes_list,
+            missing_scopes=missing_scopes,
+            reconnect_needed=reconnect_needed,
+            reconnect_reason=reconnect_reason,
+            last_synced_at=account.last_synced_at,
+            last_sync_status=account.last_sync_status,
+            sync_query=account.sync_query or DEFAULT_GMAIL_QUERY,
+            sync_label=account.sync_label or "INBOX",
+            default_opening_id=account.default_opening_id,
+            default_opening_title=default_title,
+            total_emails_synced=total_synced,
+        )
+
+    def disconnect(self, user_id: uuid.UUID) -> None:
+        account = self.session.exec(
+            select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        ).first()
+
+        if not account:
+            return
+
+        user_email = account.email
+
+        # Attempt to revoke token at Google
+        try:
+            plain_refresh = decrypt_token(account.encrypted_refresh_token)
+            if plain_refresh and "simulated" not in plain_refresh:
+                with httpx.Client(timeout=5.0) as client:
+                    client.post(GOOGLE_REVOKE_URL, params={"token": plain_refresh})
+        except Exception as e:
+            logger.warning("Google revoke call warning: %s", e)
+
+        self.session.delete(account)
+        self.session.commit()
+
+        # Audit trail entry
+        audit_log_service.record(
+            session=self.session,
+            user_id=user_id,
+            action="google_disconnected",
+            details=f"Disconnected Google account: {user_email}.",
+        )
+
+    # ── 5. Supabase Storage Upload Helper ────────────────────────────────────
+
+    def _upload_to_supabase_storage(
+        self, filename: str, file_bytes: bytes, mime_type: str = "application/pdf"
+    ) -> str:
+        """
+        Uploads file to Supabase Storage bucket using shared storage helper.
+        """
+        try:
+            return save_candidate_cv_file(filename, file_bytes, mime_type)
+        except Exception as e:
+            logger.warning("save_candidate_cv_file failed in Gmail sync: %s", e)
+
+        # Fallback to local persistent filesystem
+        local_path = LOCAL_UPLOAD_DIR / f"{uuid.uuid4()}_{filename}"
+        with open(local_path, "wb") as f:
+            f.write(file_bytes)
+
+        return f"/uploads/cvs/{local_path.name}"
+
+    # ── 6. Gmail Sync Job with Rate-Limit & Backoff Handling ─────────────────
+
+    def sync_gmail(
+        self,
+        user_id: uuid.UUID,
+        override_query: Optional[str] = None,
+        override_label: Optional[str] = None,
+    ) -> GmailSyncResponse:
+        """
+        Incremental Gmail sync job:
+          1. Fetches candidate emails with PDF/DOCX attachments matching HR query.
+          2. Skips messages recorded in emails_synced to avoid duplicates.
+          3. Handles rate limiting (HTTP 429 / 503) with exponential backoff.
+          4. Saves resume attachments to Supabase Storage.
+          5. Runs document parsing (PDF/DOCX/OCR) + deterministic extraction pipeline.
+          6. Matches job opening by subject or uses default opening.
+          7. Creates/updates Candidate profiles and records in audit trail.
+        """
+        account = self.session.exec(
+            select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        ).first()
+
+        if not account:
+            raise ValueError("No Google account connected. Please connect Google first.")
+
+        query = override_query or account.sync_query or DEFAULT_GMAIL_QUERY
+        label = override_label or account.sync_label
+        account.last_sync_status = "in_progress"
+        self.session.add(account)
+        self.session.commit()
+
+        # Pre-fetch user's job openings for subject matching
+        all_openings = self.session.exec(
+            select(JobOpening)
+            .where(JobOpening.user_id == user_id)
+            .order_by(JobOpening.created_at.desc())
+        ).all()
+
+        # Default opening fallback
+        default_opening = None
+        if account.default_opening_id:
+            default_opening = self.session.exec(
+                select(JobOpening).where(
+                    JobOpening.id == account.default_opening_id,
+                    JobOpening.user_id == user_id,
+                )
+            ).first()
+
+        if not default_opening and all_openings:
+            default_opening = all_openings[0]
+
+        errors: List[str] = []
+        messages_found = 0
+        messages_processed = 0
+        attachments_saved = 0
+        candidates_created = 0
+
+        try:
+            access_token = self.get_valid_access_token(account)
+        except Exception as e:
+            account.last_sync_status = "token_revoked" if "revoked" in str(e).lower() else "failed"
+            self.session.add(account)
+            self.session.commit()
+            raise ValueError(f"Authentication error: {e}")
+
+        # Check existing synced message IDs for incremental deduplication
+        existing_synced_ids = set(
+            self.session.exec(
+                select(EmailSynced.message_id).where(EmailSynced.user_id == user_id)
+            ).all()
+        )
+
+        # Fetch message IDs from Gmail API with exponential backoff
+        message_summaries: List[Dict[str, Any]] = []
+        if settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and not access_token.startswith("ya29.simulated"):
+            params = {"q": query, "maxResults": 25}
+            if label and label.upper() != "ALL":
+                params["labelIds"] = label
+
+            headers = {"Authorization": f"Bearer {access_token}"}
+            backoff = 1.0
+
+            for attempt in range(4):
+                try:
+                    with httpx.Client(timeout=20.0) as client:
+                        resp = client.get(
+                            f"{GMAIL_API_BASE}/messages",
+                            headers=headers,
+                            params=params,
+                        )
+                        if resp.status_code in (429, 503):
+                            logger.warning("Gmail API rate limit hit. Backing off %ss...", backoff)
+                            time.sleep(backoff)
+                            backoff = min(backoff * 2, 8.0)
+                            continue
+                        if not resp.is_success:
+                            errors.append(f"Gmail search failed: {resp.text}")
+                            break
+
+                        data = resp.json()
+                        message_summaries = data.get("messages", [])
+                        break
+                except Exception as exc:
+                    errors.append(f"Network error on search: {exc}")
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 8.0)
+        else:
+            message_summaries = []
+
+        messages_found = len(message_summaries)
+
+        # Process each message
+        for msg_summary in message_summaries:
+            msg_id = msg_summary.get("id")
+            if not msg_id or msg_id in existing_synced_ids:
+                continue
+
+            # Fetch full message details with rate-limit retry
+            msg_data: Optional[Dict[str, Any]] = None
+            for attempt in range(3):
+                try:
+                    with httpx.Client(timeout=25.0) as client:
+                        detail_resp = client.get(
+                            f"{GMAIL_API_BASE}/messages/{msg_id}",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                        )
+                        if detail_resp.status_code in (429, 503):
+                            time.sleep(2.0 ** attempt)
+                            continue
+                        if detail_resp.is_success:
+                            msg_data = detail_resp.json()
+                        else:
+                            errors.append(f"Message {msg_id}: fetch failed with {detail_resp.status_code}")
+                        break
+                except Exception as exc:
+                    time.sleep(1.0)
+                    if attempt == 2:
+                        errors.append(f"Message {msg_id}: network error {exc}")
+
+            if not msg_data:
+                continue
+
+            # Parse headers
+            payload = msg_data.get("payload", {})
+            headers_list = payload.get("headers", [])
+            header_map = {h.get("name", "").lower(): h.get("value", "") for h in headers_list}
+
+            sender = header_map.get("from", "Unknown Candidate")
+            subject = header_map.get("subject", "Resume Submission")
+            snippet = msg_data.get("snippet", "")
+
+            # Match opening by email subject vs existing opening titles
+            matched_opening = None
+            subject_lower = subject.lower()
+            for op in all_openings:
+                # Direct title substring check or keyword match
+                if op.title and op.title.lower() in subject_lower:
+                    matched_opening = op
+                    break
+                # Partial match on significant words
+                title_words = [w for w in re.split(r"\W+", op.title.lower()) if len(w) > 3]
+                if title_words and all(w in subject_lower for w in title_words[:2]):
+                    matched_opening = op
+                    break
+
+            target_opening = matched_opening or default_opening
+
+            # Extract attachments
+            attachment_names: List[str] = []
+            attachment_urls: List[str] = []
+            extracted_text = ""
+            best_att_bytes: Optional[bytes] = None
+            best_filename: Optional[str] = None
+
+            # Flatten parts recursively to find attachments
+            def collect_parts(p: dict) -> list[dict]:
+                parts = []
+                if "parts" in p:
+                    for sub in p["parts"]:
+                        parts.extend(collect_parts(sub))
+                else:
+                    parts.append(p)
+                return parts
+
+            all_parts = collect_parts(payload)
+
+            for part in all_parts:
+                filename = part.get("filename", "")
+                body = part.get("body", {})
+                att_id = body.get("attachmentId")
+                lower_name = filename.lower()
+
+                if att_id and (lower_name.endswith(".pdf") or lower_name.endswith(".docx")):
+                    att_bytes: Optional[bytes] = None
+                    try:
+                        with httpx.Client(timeout=30.0) as client:
+                            att_resp = client.get(
+                                f"{GMAIL_API_BASE}/messages/{msg_id}/attachments/{att_id}",
+                                headers={"Authorization": f"Bearer {access_token}"},
+                            )
+                            if att_resp.is_success:
+                                raw_base64 = att_resp.json().get("data", "")
+                                att_bytes = base64.urlsafe_b64decode(raw_base64)
+                            else:
+                                errors.append(f"Message {msg_id}: attachment {filename} fetch returned {att_resp.status_code}")
+                    except Exception as e:
+                        errors.append(f"Message {msg_id}: failed to download {filename}: {e}")
+
+                    if att_bytes:
+                        mime = (
+                            "application/pdf"
+                            if lower_name.endswith(".pdf")
+                            else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                        storage_url = self._upload_to_supabase_storage(filename, att_bytes, mime)
+                        attachment_names.append(filename)
+                        attachment_urls.append(storage_url)
+                        attachments_saved += 1
+
+                        if not extracted_text:
+                            best_att_bytes = att_bytes
+                            best_filename = filename
+                            try:
+                                extracted_text = parse_cv_document(att_bytes, filename=filename)
+                            except Exception as parse_err:
+                                errors.append(f"Message {msg_id}: text extraction failed for {filename}: {parse_err}")
+
+            # Record in emails_synced for deduplication
+            email_synced = EmailSynced(
+                user_id=user_id,
+                google_account_id=account.id,
+                message_id=msg_id,
+                thread_id=msg_data.get("threadId"),
+                sender=sender,
+                subject=subject,
+                snippet=snippet,
+                attachment_names=attachment_names,
+                attachment_urls=attachment_urls,
+            )
+            self.session.add(email_synced)
+            messages_processed += 1
+            existing_synced_ids.add(msg_id)
+
+            # Ingest candidate using the same deterministic extraction pipeline
+            if target_opening and extracted_text and len(extracted_text.strip()) >= 20:
+                # 1. Run deterministic field extraction
+                det = extract_all_deterministic_fields(extracted_text)
+                cand_data = det.get("extracted_data")
+
+                # Name fallback: header 'From'
+                parsed_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
+                final_name = cand_data.name if (cand_data and cand_data.name) else parsed_name or "Applicant"
+
+                # Email fallback: header 'From'
+                parsed_email = sender.split("<")[1].split(">")[0].strip() if "<" in sender else f"applicant_{uuid.uuid4().hex[:6]}@gmail.com"
+                final_email = cand_data.email if (cand_data and cand_data.email) else parsed_email
+
+                # Check if candidate exists for this opening
+                existing_candidate = self.session.exec(
+                    select(Candidate).where(
+                        Candidate.user_id == user_id,
+                        Candidate.opening_id == target_opening.id,
+                        Candidate.email == final_email.lower(),
+                    )
+                ).first()
+
+                if existing_candidate:
+                    # Update candidate with latest resume
+                    existing_candidate.cv_text = extracted_text
+                    if attachment_urls:
+                        existing_candidate.cv_file_url = attachment_urls[0]
+                    existing_candidate.updated_at = datetime.now(timezone.utc)
+                    self.session.add(existing_candidate)
+                else:
+                    new_candidate = Candidate(
+                        user_id=user_id,
+                        opening_id=target_opening.id,
+                        name=final_name,
+                        email=final_email.lower(),
+                        phone=cand_data.phone if cand_data else None,
+                        address=cand_data.address if cand_data else None,
+                        github_url=cand_data.github_url if cand_data else None,
+                        linkedin_url=cand_data.linkedin_url if cand_data else None,
+                        portfolio_url=cand_data.portfolio_url if cand_data else None,
+                        kaggle_url=cand_data.kaggle_url if cand_data else None,
+                        cv_text=extracted_text,
+                        cv_file_url=attachment_urls[0] if attachment_urls else None,
+                        stage=CandidateStage.applied,
+                        extracted_data={
+                            "current_title": cand_data.current_title if cand_data else None,
+                            "years_of_experience": cand_data.years_of_experience if cand_data else None,
+                            "top_skills": cand_data.top_skills if cand_data else [],
+                            "education": cand_data.education if cand_data else None,
+                        } if cand_data else {},
+                    )
+                    self.session.add(new_candidate)
+                    self.session.flush()
+
+                    # Save social links if present
+                    if cand_data:
+                        for l_type, l_url in [
+                            ("github", cand_data.github_url),
+                            ("linkedin", cand_data.linkedin_url),
+                            ("portfolio", cand_data.portfolio_url),
+                            ("kaggle", cand_data.kaggle_url),
+                        ]:
+                            if l_url:
+                                link_row = CandidateLink(
+                                    candidate_id=new_candidate.id,
+                                    link_type=l_type,
+                                    url=l_url,
+                                    is_verified=True,
+                                )
+                                self.session.add(link_row)
+
+                    candidates_created += 1
+
+                    # Audit trail entry per candidate created
+                    audit_log_service.record(
+                        session=self.session,
+                        user_id=user_id,
+                        action="candidate_created",
+                        candidate_id=new_candidate.id,
+                        opening_id=target_opening.id,
+                        to_stage="applied",
+                        details=f"Candidate {new_candidate.name} ingested from Gmail message '{subject}'.",
+                    )
+
+        now = datetime.now(timezone.utc)
+        account.last_synced_at = now
+        account.last_sync_status = "success" if not errors else ("partial" if messages_processed > 0 else "failed")
+        self.session.add(account)
+        self.session.commit()
+
+        # Audit trail for Gmail sync completion
+        audit_log_service.record(
+            session=self.session,
+            user_id=user_id,
+            action="gmail_synced",
+            details=(
+                f"Gmail sync completed: {messages_processed}/{messages_found} messages processed, "
+                f"{attachments_saved} resumes stored, {candidates_created} candidates ingested, "
+                f"{len(errors)} warnings."
+            ),
+        )
+
+        return GmailSyncResponse(
+            status=account.last_sync_status,
+            messages_found=messages_found,
+            messages_processed=messages_processed,
+            attachments_saved=attachments_saved,
+            candidates_created=candidates_created,
+            errors=errors,
+            last_synced_at=now,
+        )
+
+    # ── 7. Email Templates & Preview ─────────────────────────────────────────
+
+    def preview_email(
+        self, user_id: uuid.UUID, request: GooglePreviewEmailRequest
+    ) -> GooglePreviewEmailResponse:
+        """
+        Renders template variables and produces a preview of the candidate email.
+        """
+        candidate = self.session.exec(
+            select(Candidate).where(
+                Candidate.id == request.candidate_id,
+                Candidate.user_id == user_id,
+            )
+        ).first()
+
+        if not candidate:
+            raise ValueError(f"Candidate '{request.candidate_id}' not found.")
+
+        opening = None
+        if candidate.opening_id:
+            opening = self.session.exec(
+                select(JobOpening).where(JobOpening.id == candidate.opening_id)
+            ).first()
+
+        role_name = opening.title if opening else "Position"
+        company_name = request.company_name or "Talent Corp"
+        slot_link = request.slot_link or f"{settings.FRONTEND_URL}/schedule/{candidate.id}"
+
+        variables = {
+            "candidate_name": candidate.name,
+            "role": role_name,
+            "company": company_name,
+            "slot_link": slot_link,
+        }
+
+        # Select template
+        tmpl = request.template_name.lower()
+        if tmpl == "interview_invitation":
+            subject = f"Interview Invitation: {role_name} at {company_name}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Thank you for applying for the {role_name} position at {company_name}. "
+                f"We were impressed by your background and experience, and we would like to invite you to an interview.\n\n"
+                f"Please select a time slot that works best for you using our self-scheduling link:\n"
+                f"{slot_link}\n\n"
+                f"We look forward to speaking with you!\n\n"
+                f"Best regards,\n"
+                f"Hiring Team\n{company_name}"
+            )
+        elif tmpl == "candidate_followup":
+            subject = f"Update on your application for {role_name} at {company_name}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Thank you for taking the time to interview with us for the {role_name} role at {company_name}. "
+                f"Our team is currently completing candidate evaluations and will share the next steps with you shortly.\n\n"
+                f"Please feel free to reach out if you have any questions in the meantime.\n\n"
+                f"Best regards,\n"
+                f"Hiring Team\n{company_name}"
+            )
+        elif tmpl == "rejection":
+            subject = f"Application Status: {role_name} at {company_name}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Thank you for your interest in the {role_name} role at {company_name} and for taking the time to share your background with us.\n\n"
+                f"After careful review of your qualifications alongside our current organizational requirements, "
+                f"we have decided to proceed with other applicants whose experience more closely aligns with this particular role.\n\n"
+                f"We genuinely appreciate your time and wish you continued success in your job search.\n\n"
+                f"Sincerely,\n"
+                f"Talent Acquisition Team\n{company_name}"
+            )
+        else:
+            # Custom template
+            subject = request.custom_subject or f"Regarding your application for {role_name}"
+            body = request.custom_body or f"Hi {candidate.name},\n\nThank you for your interest in {company_name}."
+
+        # Interpolate variables in custom text as well
+        for key, val in variables.items():
+            subject = subject.replace(f"{{{key}}}", str(val))
+            body = body.replace(f"{{{key}}}", str(val))
+
+        return GooglePreviewEmailResponse(
+            candidate_id=candidate.id,
+            candidate_name=candidate.name,
+            candidate_email=candidate.email,
+            recipient_email=candidate.email,
+            subject=subject,
+            body=body,
+            variables=variables,
+        )
+
+    # ── 8. Send Email via Gmail API (gmail.send) ─────────────────────────────
+
+    def send_email(
+        self, user_id: uuid.UUID, request: GoogleSendEmailRequest
+    ) -> GoogleSendEmailResponse:
+        """
+        Sends an email from the recruiter's connected Google account via Gmail API (gmail.send).
+        Saves the message in the messages table and logs to the audit trail.
+        """
+        account = self.session.exec(
+            select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        ).first()
+
+        if not account:
+            raise ValueError("No Google account connected. Please connect Google first.")
+
+        # Check for gmail.send scope
+        scopes_list = account.scopes if isinstance(account.scopes, list) else []
+        norm_scopes = [s.lower().replace("https://www.googleapis.com/auth/", "").strip() for s in scopes_list]
+        if "gmail.send" not in norm_scopes:
+            raise ValueError(
+                "Missing required permission 'gmail.send'. "
+                "Please reconnect your Google account in Settings to grant email sending permissions."
+            )
+
+        candidate = self.session.exec(
+            select(Candidate).where(
+                Candidate.id == request.candidate_id,
+                Candidate.user_id == user_id,
+            )
+        ).first()
+
+        if not candidate:
+            raise ValueError(f"Candidate '{request.candidate_id}' not found.")
+
+        if not candidate.email or "@" not in candidate.email or candidate.email.endswith("@no-email.com"):
+            raise ValueError(f"Candidate '{candidate.name}' does not have a valid recipient email address.")
+
+        # Construct RFC 2822 EmailMessage
+        msg = EmailMessage()
+        msg["To"] = candidate.email
+        msg["From"] = account.email
+        msg["Subject"] = request.subject
+        msg.set_content(request.body)
+        raw_base64 = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+        # Obtain fresh access token
+        access_token = self.get_valid_access_token(account)
+
+        # Create pending message record
+        message_row = Message(
+            candidate_id=candidate.id,
+            user_id=user_id,
+            direction=MessageDirection.outbound,
+            message_type=MessageType.email,
+            body=request.body,
+            status=MessageStatus.pending,
+            template_name=request.template_name or "custom",
+            template_variables={"subject": request.subject},
+        )
+        self.session.add(message_row)
+        self.session.commit()
+        self.session.refresh(message_row)
+
+        google_message_id: Optional[str] = None
+        send_error: Optional[str] = None
+
+        if settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and not access_token.startswith("ya29.simulated"):
+            # Send via Gmail API with retry
+            backoff = 1.0
+            for attempt in range(3):
+                try:
+                    with httpx.Client(timeout=20.0) as client:
+                        resp = client.post(
+                            f"{GMAIL_API_BASE}/messages/send",
+                            headers={
+                                "Authorization": f"Bearer {access_token}",
+                                "Content-Type": "application/json",
+                            },
+                            json={"raw": raw_base64},
+                        )
+                        if resp.status_code in (429, 503):
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        if not resp.is_success:
+                            send_error = f"Gmail API error ({resp.status_code}): {resp.text}"
+                            break
+
+                        data = resp.json()
+                        google_message_id = data.get("id")
+                        break
+                except Exception as exc:
+                    send_error = f"Network error sending email: {exc}"
+                    time.sleep(backoff)
+                    backoff *= 2
+        else:
+            # Simulated send for testing environments without credentials
+            google_message_id = f"mock_msg_{uuid.uuid4().hex[:12]}"
+
+        now = datetime.now(timezone.utc)
+
+        if send_error:
+            message_row.status = MessageStatus.failed
+            message_row.error_message = send_error
+            message_row.failed_at = now
+            self.session.add(message_row)
+            self.session.commit()
+
+            # Audit trail for failure
+            audit_log_service.record(
+                session=self.session,
+                user_id=user_id,
+                action="email_send_failed",
+                candidate_id=candidate.id,
+                opening_id=candidate.opening_id,
+                details=f"Failed to send email to {candidate.email}: {send_error}",
+            )
+            raise ValueError(send_error)
+
+        # Successful send
+        message_row.status = MessageStatus.sent
+        message_row.sent_at = now
+        message_row.whatsapp_message_id = google_message_id
+        self.session.add(message_row)
+        self.session.commit()
+
+        # Audit trail for success
+        audit_log_service.record(
+            session=self.session,
+            user_id=user_id,
+            action="email_sent",
+            candidate_id=candidate.id,
+            opening_id=candidate.opening_id,
+            details=f"Sent email '{request.subject}' to {candidate.email} via Gmail API (Message ID: {google_message_id}).",
+        )
+
+        return GoogleSendEmailResponse(
+            message_id=message_row.id,
+            candidate_id=candidate.id,
+            recipient_email=candidate.email,
+            subject=request.subject,
+            status="sent",
+            sent_at=now,
+            google_message_id=google_message_id,
+        )
