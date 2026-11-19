@@ -1163,11 +1163,25 @@ class GoogleService:
         if not candidate.email or "@" not in candidate.email or candidate.email.endswith("@no-email.com"):
             raise ValueError(f"Candidate '{candidate.name}' does not have a valid recipient email address.")
 
+        # Look for existing thread ID to reply within the same Gmail thread
+        target_thread_id = getattr(request, "thread_id", None)
+        if not target_thread_id:
+            prev_msg = self.session.exec(
+                select(Message)
+                .where(Message.candidate_id == candidate.id, Message.user_id == user_id)
+                .order_by(Message.created_at.desc())
+            ).first()
+            if prev_msg and prev_msg.template_variables:
+                target_thread_id = prev_msg.template_variables.get("thread_id") or prev_msg.template_variables.get("google_message_id")
+
         # Construct RFC 2822 EmailMessage
         msg = EmailMessage()
         msg["To"] = candidate.email
         msg["From"] = account.email
         msg["Subject"] = request.subject
+        if target_thread_id:
+            msg["In-Reply-To"] = f"<{target_thread_id}>"
+            msg["References"] = f"<{target_thread_id}>"
         msg.set_content(request.body)
         raw_base64 = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
 
@@ -1183,18 +1197,23 @@ class GoogleService:
             body=request.body,
             status=MessageStatus.pending,
             template_name=request.template_name or "custom",
-            template_variables={"subject": request.subject},
+            template_variables={"subject": request.subject, "thread_id": target_thread_id},
         )
         self.session.add(message_row)
         self.session.commit()
         self.session.refresh(message_row)
 
         google_message_id: Optional[str] = None
+        returned_thread_id: Optional[str] = None
         send_error: Optional[str] = None
 
         if settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and not access_token.startswith("ya29.simulated"):
             # Send via Gmail API with retry
             backoff = 1.0
+            send_payload = {"raw": raw_base64}
+            if target_thread_id:
+                send_payload["threadId"] = target_thread_id
+
             for attempt in range(3):
                 try:
                     with httpx.Client(timeout=20.0) as client:
@@ -1204,7 +1223,7 @@ class GoogleService:
                                 "Authorization": f"Bearer {access_token}",
                                 "Content-Type": "application/json",
                             },
-                            json={"raw": raw_base64},
+                            json=send_payload,
                         )
                         if resp.status_code in (429, 503):
                             time.sleep(backoff)
@@ -1216,6 +1235,7 @@ class GoogleService:
 
                         data = resp.json()
                         google_message_id = data.get("id")
+                        returned_thread_id = data.get("threadId") or target_thread_id
                         break
                 except Exception as exc:
                     send_error = f"Network error sending email: {exc}"
@@ -1224,6 +1244,7 @@ class GoogleService:
         else:
             # Simulated send for testing environments without credentials
             google_message_id = f"mock_msg_{uuid.uuid4().hex[:12]}"
+            returned_thread_id = target_thread_id or f"thread_{uuid.uuid4().hex[:12]}"
 
         now = datetime.now(timezone.utc)
 
@@ -1249,6 +1270,11 @@ class GoogleService:
         message_row.status = MessageStatus.sent
         message_row.sent_at = now
         message_row.whatsapp_message_id = google_message_id
+        message_row.template_variables = {
+            "subject": request.subject,
+            "thread_id": returned_thread_id,
+            "google_message_id": google_message_id,
+        }
         self.session.add(message_row)
         self.session.commit()
 

@@ -920,34 +920,49 @@ export const googleApi = {
 
 // ── Email Conversations & Messaging ────────────────────────────────────────
 
+export interface EmailMessageAttachment {
+  filename: string;
+  url: string;
+  size?: string | null;
+  mime_type?: string | null;
+}
+
 export interface EmailConversationSummary {
   candidate_id: string;
   candidate_name: string;
   candidate_email: string;
+  candidate_phone?: string | null;
   candidate_stage: string;
   opening_title?: string | null;
   last_message_body?: string | null;
   last_message_subject?: string | null;
   last_message_direction?: string | null;
+  last_message_type?: string;
   last_message_at?: string | null;
   unread: boolean;
+  unread_count?: number;
+  has_attachments?: boolean;
 }
 
 export interface EmailConversationsResponse {
   conversations: EmailConversationSummary[];
   total_conversations: number;
   awaiting_reply_count: number;
+  unread_count?: number;
 }
 
 export interface EmailMessageItem {
   id: string;
   candidate_id: string;
   direction: "inbound" | "outbound" | string;
+  message_type?: string;
   subject?: string | null;
   body: string;
   status: string;
   sent_at?: string | null;
   created_at: string;
+  thread_id?: string | null;
+  attachments?: EmailMessageAttachment[];
 }
 
 export interface EmailThreadResponse {

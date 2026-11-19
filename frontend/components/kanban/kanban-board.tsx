@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -22,6 +22,11 @@ import {
   Download,
   Users,
   History,
+  LayoutGrid,
+  Table2,
+  Calendar,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
 
 import {
@@ -37,10 +42,13 @@ import { useToast } from "@/components/ui/use-toast";
 import { PIPELINE_COLUMNS, PipelineStage } from "./types";
 import { KanbanColumn } from "./kanban-column";
 import { KanbanCard } from "./kanban-card";
+import { KanbanTable } from "./kanban-table";
 import { PipelineAuditDrawer } from "./pipeline-audit-drawer";
 import { BulkActionsToolbar } from "./bulk-actions-toolbar";
 import { AddCandidateDialog } from "@/components/candidates/add-candidate-dialog";
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
+import { ContactCandidateDialog } from "@/components/candidates/contact-candidate-dialog";
+import { ScheduleInviteModal } from "@/components/scheduling/schedule-invite-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -57,9 +65,15 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  // View Mode: Board vs Table
+  const [viewMode, setViewMode] = useState<"board" | "table">("board");
+
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOpeningId, setSelectedOpeningId] = useState<string>("all");
+  const [selectedScoreFilter, setSelectedScoreFilter] = useState<string>("all");
+  const [selectedStageFilter, setSelectedStageFilter] = useState<string>("all");
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>("all");
   const [mobileSelectedStage, setMobileSelectedStage] = useState<string>("all");
 
   // Dialog & Drawer States
@@ -68,19 +82,30 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false);
 
+  // Quick Action Dialogs State
+  const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [scheduleCandidate, setScheduleCandidate] = useState<Candidate | null>(null);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+
   // Bulk Selection States
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
-  const handleToggleSelect = (candidateId: string, e: React.MouseEvent) => {
+  const handleToggleSelect = useCallback((candidateId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setSelectedCandidateIds((prev) =>
       prev.includes(candidateId) ? prev.filter((id) => id !== candidateId) : [...prev, candidateId]
     );
-  };
+  }, []);
 
-  const handleClearSelection = () => {
+  const handleSelectAll = useCallback((candidateIds: string[]) => {
+    setSelectedCandidateIds(candidateIds);
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
     setSelectedCandidateIds([]);
-  };
+  }, []);
 
   // Active dragging item for DragOverlay
   const [activeCandidate, setActiveCandidate] = useState<Candidate | null>(null);
@@ -114,7 +139,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
     queryFn: () =>
       candidatesApi.list({
         opening_id: selectedOpeningId !== "all" ? selectedOpeningId : undefined,
-        limit: 100,
+        limit: 500,
       }),
   });
   const candidates = candidatesData?.items || [];
@@ -220,17 +245,114 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
     }
   };
 
-  // Filter candidates by search term
-  const filteredCandidates = candidates.filter((cand) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      cand.name.toLowerCase().includes(q) ||
-      cand.email.toLowerCase().includes(q) ||
-      (cand.opening_title && cand.opening_title.toLowerCase().includes(q)) ||
-      (cand.matched_skills && cand.matched_skills.some((s) => s.toLowerCase().includes(q)))
-    );
-  });
+  // Quick Action Handlers
+  const handleEmailAction = useCallback((candidate: Candidate) => {
+    setContactCandidate(candidate);
+    setContactDialogOpen(true);
+  }, []);
+
+  const handleWhatsAppAction = useCallback((candidate: Candidate) => {
+    if (!candidate.phone) {
+      toast({
+        title: "No Phone Number",
+        description: `${candidate.name} has no phone number recorded.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const cleanPhone = candidate.phone.replace(/[^0-9]/g, "");
+    window.open(`https://wa.me/${cleanPhone}`, "_blank", "noopener,noreferrer");
+  }, [toast]);
+
+  const handleScheduleAction = useCallback((candidate: Candidate) => {
+    setScheduleCandidate(candidate);
+    setScheduleModalOpen(true);
+  }, []);
+
+  const handleStageChangeFromTable = useCallback(
+    (candidateId: string, newStage: CandidateStage, candidateName: string) => {
+      updateStageMutation.mutate({
+        id: candidateId,
+        stage: newStage,
+        candidateName,
+      });
+    },
+    [updateStageMutation]
+  );
+
+  // Multi-Criteria Filtering
+  const filteredCandidates = useMemo(() => {
+    return candidates.filter((cand) => {
+      // 1. Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = cand.name?.toLowerCase().includes(q);
+        const matchEmail = cand.email?.toLowerCase().includes(q);
+        const matchOpening = cand.opening_title?.toLowerCase().includes(q);
+        const matchSkills = cand.matched_skills?.some((s) => s.toLowerCase().includes(q));
+        if (!matchName && !matchEmail && !matchOpening && !matchSkills) {
+          return false;
+        }
+      }
+
+      // 2. Stage Filter
+      if (selectedStageFilter !== "all" && cand.stage !== selectedStageFilter) {
+        return false;
+      }
+
+      // 3. Score Filter
+      if (selectedScoreFilter !== "all") {
+        const score = cand.score;
+        if (selectedScoreFilter === "high" && (score === null || score === undefined || score < 80)) {
+          return false;
+        }
+        if (selectedScoreFilter === "medium" && (score === null || score === undefined || score < 60 || score >= 80)) {
+          return false;
+        }
+        if (selectedScoreFilter === "low" && (score === null || score === undefined || score >= 60)) {
+          return false;
+        }
+        if (selectedScoreFilter === "unscored" && score !== null && score !== undefined) {
+          return false;
+        }
+      }
+
+      // 4. Date Filter
+      if (selectedDateFilter !== "all") {
+        const candDate = new Date(cand.created_at || cand.updated_at);
+        const now = new Date();
+        const diffMs = now.getTime() - candDate.getTime();
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        if (selectedDateFilter === "today" && diffHours > 24) {
+          return false;
+        }
+        if (selectedDateFilter === "7d" && diffHours > 24 * 7) {
+          return false;
+        }
+        if (selectedDateFilter === "30d" && diffHours > 24 * 30) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [candidates, searchQuery, selectedStageFilter, selectedScoreFilter, selectedDateFilter]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    selectedOpeningId !== "all" ||
+    selectedScoreFilter !== "all" ||
+    selectedStageFilter !== "all" ||
+    selectedDateFilter !== "all";
+
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setSelectedOpeningId("all");
+    setSelectedScoreFilter("all");
+    setSelectedStageFilter("all");
+    setSelectedDateFilter("all");
+  };
 
   // Shortlist CSV Export Download with Bearer Authentication
   const handleExportShortlist = async () => {
@@ -364,40 +486,62 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7.5rem)] w-full space-y-4">
-      {/* ── Page Header & Controls ─────────────────────────────────── */}
+    <div className="flex flex-col h-[calc(100vh-7.5rem)] w-full space-y-3.5">
+      {/* ── Page Header & Top Toolbar ───────────────────────────────── */}
       <PageHeader
         title="Candidate Pipeline"
-        description="Visual Kanban workflow across Applied, Screening, Interview, Offer, and Rejected stages."
+        description="Active candidate evaluation pipeline with real-time drag-and-drop, table views, and automated actions."
         badge={
-          <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+          <Badge variant="outline" className="gap-1 font-mono text-[11px] bg-card">
             <Users className="h-3 w-3 text-primary" />
-            <span>{filteredCandidates.length} Candidates</span>
+            <span>{filteredCandidates.length} Active Candidates</span>
           </Badge>
         }
         actions={
           <div className="flex items-center gap-2">
+            {/* View Mode Toggle: Board vs Table */}
+            <div className="inline-flex rounded-lg border border-border/80 bg-muted/40 p-0.5">
+              <Button
+                variant={viewMode === "board" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("board")}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium rounded-md"
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Board</span>
+              </Button>
+              <Button
+                variant={viewMode === "table" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("table")}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium rounded-md"
+              >
+                <Table2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Table</span>
+              </Button>
+            </div>
+
             <Button
               id="btn-open-audit-drawer"
               variant="outline"
               size="sm"
               onClick={() => setAuditDrawerOpen(true)}
-              className="gap-1.5"
+              className="gap-1.5 h-8 text-xs font-medium"
               title="View Pipeline Audit Trail"
             >
               <History className="h-3.5 w-3.5 text-muted-foreground" />
-              <span>Audit Trail</span>
+              <span className="hidden sm:inline">Audit Trail</span>
             </Button>
 
             <Button
               variant="outline"
               size="sm"
               onClick={handleExportShortlist}
-              className="gap-1.5"
+              className="gap-1.5 h-8 text-xs font-medium"
               title="Download Shortlist CSV"
             >
               <Download className="h-3.5 w-3.5" />
-              <span>Export CSV</span>
+              <span className="hidden sm:inline">Export CSV</span>
             </Button>
 
             <Button
@@ -414,7 +558,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             <Button
               size="sm"
               onClick={() => setAddDialogOpen(true)}
-              className="font-medium gap-1.5 shadow-xs"
+              className="h-8 font-medium gap-1.5 text-xs shadow-xs"
             >
               <Plus className="h-3.5 w-3.5" />
               <span>Add Candidate</span>
@@ -422,12 +566,13 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
           </div>
         }
       >
-        <div className="flex flex-wrap items-center gap-2.5 max-w-3xl">
+        {/* ── Filter Controls Row ───────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 w-full">
           {/* Search Input */}
-          <div className="relative flex-1 min-w-[220px]">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
-              placeholder="Filter by name, email, or skill..."
+              placeholder="Search by name, email, or skill..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-8 text-xs h-8 bg-card"
@@ -442,13 +587,13 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             )}
           </div>
 
-          {/* Opening Switcher */}
+          {/* Requisition / Opening Filter */}
           <div className="flex items-center gap-1.5">
             <Briefcase className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <select
               value={selectedOpeningId}
               onChange={(e) => setSelectedOpeningId(e.target.value)}
-              className="text-xs h-8 px-2.5 rounded-md border border-border/80 bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              className="text-xs h-8 px-2.5 rounded-lg border border-border/80 bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[190px] truncate"
             >
               <option value="all">All Requisitions ({openings.length})</option>
               {openings.map((op) => (
@@ -458,37 +603,91 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
               ))}
             </select>
           </div>
+
+          {/* Stage Filter */}
+          <select
+            value={selectedStageFilter}
+            onChange={(e) => setSelectedStageFilter(e.target.value)}
+            className="text-xs h-8 px-2.5 rounded-lg border border-border/80 bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+          >
+            <option value="all">All Stages</option>
+            {PIPELINE_COLUMNS.map((col) => (
+              <option key={col.id} value={col.id}>
+                {col.title}
+              </option>
+            ))}
+          </select>
+
+          {/* Score Filter */}
+          <select
+            value={selectedScoreFilter}
+            onChange={(e) => setSelectedScoreFilter(e.target.value)}
+            className="text-xs h-8 px-2.5 rounded-lg border border-border/80 bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+          >
+            <option value="all">All Scores</option>
+            <option value="high">High Match (≥ 80%)</option>
+            <option value="medium">Medium Match (60% - 79%)</option>
+            <option value="low">Low Match (&lt; 60%)</option>
+            <option value="unscored">Unscored / Pending</option>
+          </select>
+
+          {/* Date Filter */}
+          <select
+            value={selectedDateFilter}
+            onChange={(e) => setSelectedDateFilter(e.target.value)}
+            className="text-xs h-8 px-2.5 rounded-lg border border-border/80 bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+          >
+            <option value="all">All Time</option>
+            <option value="today">Past 24 Hours</option>
+            <option value="7d">Past 7 Days</option>
+            <option value="30d">Past 30 Days</option>
+          </select>
+
+          {/* Reset Filters button */}
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleResetFilters}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset Filters</span>
+            </Button>
+          )}
         </div>
       </PageHeader>
 
-      {/* ── Mobile Column Tab Switcher ──────────────────────────────── */}
-      <div className="flex lg:hidden gap-1 mb-3 overflow-x-auto pb-1 shrink-0">
-        <Button
-          variant={mobileSelectedStage === "all" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setMobileSelectedStage("all")}
-          className="text-xs h-7 shrink-0"
-        >
-          All Stages
-        </Button>
-        {PIPELINE_COLUMNS.map((col) => (
+      {/* ── Mobile Column Tab Switcher (Board View Only) ─────────────── */}
+      {viewMode === "board" && (
+        <div className="flex lg:hidden gap-1 overflow-x-auto pb-1 shrink-0">
           <Button
-            key={col.id}
-            variant={mobileSelectedStage === col.id ? "default" : "outline"}
+            variant={mobileSelectedStage === "all" ? "default" : "outline"}
             size="sm"
-            onClick={() => setMobileSelectedStage(col.id)}
-            className="text-xs h-7 shrink-0 gap-1"
+            onClick={() => setMobileSelectedStage("all")}
+            className="text-xs h-7 shrink-0"
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${col.dotColor}`} />
-            {col.title}
+            All Stages
           </Button>
-        ))}
-      </div>
+          {PIPELINE_COLUMNS.map((col) => (
+            <Button
+              key={col.id}
+              variant={mobileSelectedStage === col.id ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMobileSelectedStage(col.id)}
+              className="text-xs h-7 shrink-0 gap-1"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${col.dotColor}`} />
+              {col.title}
+            </Button>
+          ))}
+        </div>
+      )}
 
-      {/* ── Kanban Grid Body ────────────────────────────────────────── */}
+      {/* ── Main Pipeline Content Body ───────────────────────────────── */}
       <div className="flex-1 min-h-0">
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 h-full">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3.5 h-full">
             {PIPELINE_COLUMNS.map((col) => (
               <div
                 key={col.id}
@@ -517,7 +716,25 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             actionText="Add First Candidate"
             onAction={() => setAddDialogOpen(true)}
           />
+        ) : viewMode === "table" ? (
+          /* Table View */
+          <KanbanTable
+            candidates={filteredCandidates}
+            selectedCandidateIds={selectedCandidateIds}
+            onToggleSelect={handleToggleSelect}
+            onSelectAll={handleSelectAll}
+            onClearSelection={handleClearSelection}
+            onCardClick={(cand) => {
+              setSelectedCandidate(cand);
+              setDrawerOpen(true);
+            }}
+            onStageChange={handleStageChangeFromTable}
+            onEmail={handleEmailAction}
+            onWhatsApp={handleWhatsAppAction}
+            onSchedule={handleScheduleAction}
+          />
         ) : (
+          /* Board (Kanban) View */
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -546,6 +763,9 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
                       setDrawerOpen(true);
                     }}
                     onAddClick={() => setAddDialogOpen(true)}
+                    onEmail={handleEmailAction}
+                    onWhatsApp={handleWhatsAppAction}
+                    onSchedule={handleScheduleAction}
                   />
                 );
               })}
@@ -601,6 +821,30 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
           queryClient.invalidateQueries({ queryKey: ["candidates"] });
         }}
       />
+
+      {/* ── Quick Action: Email Candidate Dialog ───────────────────── */}
+      {contactDialogOpen && (
+        <ContactCandidateDialog
+          open={contactDialogOpen}
+          onOpenChange={(open) => {
+            setContactDialogOpen(open);
+            if (!open) setContactCandidate(null);
+          }}
+          candidate={contactCandidate}
+        />
+      )}
+
+      {/* ── Quick Action: Schedule Interview Modal ─────────────────── */}
+      {scheduleModalOpen && scheduleCandidate && (
+        <ScheduleInviteModal
+          isOpen={scheduleModalOpen}
+          onClose={() => {
+            setScheduleModalOpen(false);
+            setScheduleCandidate(null);
+          }}
+          candidate={scheduleCandidate}
+        />
+      )}
     </div>
   );
 }

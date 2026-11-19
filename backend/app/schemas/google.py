@@ -100,6 +100,7 @@ class GoogleSendEmailRequest(BaseModel):
     subject: str = Field(..., min_length=1, max_length=500)
     body: str = Field(..., min_length=1)
     template_name: Optional[str] = Field(default="custom", description="Template name used, if any")
+    thread_id: Optional[str] = Field(default=None, description="Gmail thread ID to reply within the same thread")
 
 
 class GoogleSendEmailResponse(BaseModel):
@@ -112,34 +113,49 @@ class GoogleSendEmailResponse(BaseModel):
     google_message_id: Optional[str] = None
 
 
+class EmailMessageAttachment(BaseModel):
+    filename: str
+    url: str
+    size: Optional[str] = None
+    mime_type: Optional[str] = None
+
+
 class EmailConversationSummary(BaseModel):
     candidate_id: uuid.UUID
     candidate_name: str
     candidate_email: str
+    candidate_phone: Optional[str] = None
     candidate_stage: str
     opening_title: Optional[str] = None
     last_message_body: Optional[str] = None
     last_message_subject: Optional[str] = None
     last_message_direction: Optional[str] = None
+    last_message_type: str = "email"
     last_message_at: Optional[datetime] = None
     unread: bool = False
+    unread_count: int = 0
+    has_attachments: bool = False
 
 
 class EmailConversationsResponse(BaseModel):
     conversations: List[EmailConversationSummary] = Field(default_factory=list)
     total_conversations: int = 0
     awaiting_reply_count: int = 0
+    unread_count: int = 0
 
 
 class EmailMessageItem(BaseModel):
     id: uuid.UUID
     candidate_id: uuid.UUID
     direction: str
+    message_type: str = "email"
     subject: Optional[str] = None
     body: str
     status: str
     sent_at: Optional[datetime] = None
     created_at: datetime
+    thread_id: Optional[str] = None
+    attachments: List[EmailMessageAttachment] = Field(default_factory=list)
 
 
 class EmailThreadResponse(BaseModel):
