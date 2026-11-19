@@ -30,6 +30,8 @@ import {
   Clock,
   MessageSquare,
   Phone,
+  UserCheck,
+  FileText,
 } from "lucide-react";
 
 import {
@@ -483,10 +485,17 @@ export default function SettingsPage() {
                 </div>
 
                 {/* Sync Status Stats */}
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="p-3 rounded-lg border bg-card space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Synced from Gmail</span>
+                    <p className="font-semibold text-emerald-600 dark:text-emerald-400 text-sm flex items-center gap-1.5">
+                      <UserCheck className="h-4 w-4" />
+                      <span>{googleStatus.synced_from_gmail_count ?? 0} Candidates</span>
+                    </p>
+                  </div>
                   <div className="p-3 rounded-lg border bg-card space-y-1">
                     <span className="text-[11px] text-muted-foreground">Last Synced</span>
-                    <p className="font-medium text-foreground">
+                    <p className="font-medium text-foreground text-xs truncate">
                       {googleStatus.last_synced_at
                         ? new Date(googleStatus.last_synced_at).toLocaleString()
                         : "Never Synced"}
@@ -564,6 +573,76 @@ export default function SettingsPage() {
                         </ul>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Per-Email Resume Ingestion Results */}
+                {((lastSyncResult?.results && lastSyncResult.results.length > 0) ||
+                  (googleStatus.recent_sync_results && googleStatus.recent_sync_results.length > 0)) && (
+                  <div className="p-3.5 rounded-lg border bg-card space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-medium text-foreground text-xs">
+                        <FileText className="h-4 w-4 text-primary" />
+                        <span>Recent Gmail Resume Ingestion Outcomes</span>
+                      </div>
+                      <Badge variant="outline" className="text-[10px]">
+                        {(lastSyncResult?.results || googleStatus.recent_sync_results || []).length} Synced Emails
+                      </Badge>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] text-left border-collapse">
+                        <thead>
+                          <tr className="border-b text-muted-foreground">
+                            <th className="pb-1.5 font-medium">Outcome</th>
+                            <th className="pb-1.5 font-medium">Email Details</th>
+                            <th className="pb-1.5 font-medium">Job Opening</th>
+                            <th className="pb-1.5 font-medium">Result & Details</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/40">
+                          {(lastSyncResult?.results || googleStatus.recent_sync_results || []).map((item, idx) => {
+                            const isCreated = item.status === "created";
+                            const isDuplicate = item.status === "duplicate";
+                            return (
+                              <tr key={item.message_id || idx} className="hover:bg-muted/30">
+                                <td className="py-2.5 pr-2 whitespace-nowrap align-top">
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] font-medium capitalize ${
+                                      isCreated
+                                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                        : isDuplicate
+                                        ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                                        : "bg-destructive/10 text-destructive border-destructive/20"
+                                    }`}
+                                  >
+                                    {isCreated ? "Created" : isDuplicate ? "Duplicate / Updated" : "Failed"}
+                                  </Badge>
+                                </td>
+                                <td className="py-2.5 pr-2 max-w-[220px] align-top">
+                                  <p className="font-semibold text-foreground truncate">{item.subject || "No Subject"}</p>
+                                  <p className="text-[10px] text-muted-foreground truncate">{item.sender || "Unknown Sender"}</p>
+                                </td>
+                                <td className="py-2.5 pr-2 text-foreground truncate max-w-[150px] align-top">
+                                  {item.opening_title || "General Applications"}
+                                </td>
+                                <td className="py-2.5 text-muted-foreground align-top">
+                                  <span>{item.reason}</span>
+                                  {item.candidate_id && (
+                                    <a
+                                      href={`/pipeline?candidate_id=${item.candidate_id}`}
+                                      className="ml-2 text-primary hover:underline font-medium inline-flex items-center gap-0.5"
+                                    >
+                                      View in Pipeline &rarr;
+                                    </a>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
 

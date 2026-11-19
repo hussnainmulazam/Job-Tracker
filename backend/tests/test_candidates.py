@@ -92,7 +92,7 @@ def test_upload_candidate_pdf_cv(client: TestClient, user_a: dict):
         "Senior Backend Developer with 7 years of Python, FastAPI, and Postgres microservice design."
     )
 
-    with patch("app.services.candidate_service.extract_text_from_pdf", return_value=extracted_mock_text):
+    with patch("app.services.candidate_service.parse_cv_document", return_value=extracted_mock_text):
         res = client.post(
             "/api/v1/candidates/upload",
             data={
@@ -126,7 +126,7 @@ def test_update_candidate_cv_pdf(client: TestClient, user_a: dict):
     candidate_id = cand_res.json()["id"]
 
     new_pdf_text = "Updated Staff Engineer Resume with Distributed Systems experience."
-    with patch("app.services.candidate_service.extract_text_from_pdf", return_value=new_pdf_text):
+    with patch("app.services.candidate_service.parse_cv_document", return_value=new_pdf_text):
         res = client.post(
             f"/api/v1/candidates/{candidate_id}/upload-cv",
             files={"file": ("updated_resume.pdf", _make_dummy_pdf(), "application/pdf")},

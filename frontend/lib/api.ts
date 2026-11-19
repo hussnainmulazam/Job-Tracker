@@ -775,6 +775,17 @@ export const dashboardApi = {
 
 // ── Google Integrations API ──────────────────────────────────────────────────
 
+export interface EmailSyncItemResult {
+  message_id: string;
+  sender?: string | null;
+  subject?: string | null;
+  status: "created" | "duplicate" | "failed" | string;
+  candidate_id?: string | null;
+  candidate_name?: string | null;
+  opening_title?: string | null;
+  reason?: string | null;
+}
+
 export interface GoogleAccountStatus {
   is_connected: boolean;
   email: string | null;
@@ -789,6 +800,8 @@ export interface GoogleAccountStatus {
   default_opening_id?: string | null;
   default_opening_title?: string | null;
   total_emails_synced: number;
+  synced_from_gmail_count?: number;
+  recent_sync_results?: EmailSyncItemResult[];
 }
 
 export interface GoogleAuthUrlResponse {
@@ -802,6 +815,8 @@ export interface GmailSyncResponse {
   messages_processed: number;
   attachments_saved: number;
   candidates_created: number;
+  synced_from_gmail_count?: number;
+  results?: EmailSyncItemResult[];
   errors: string[];
   last_synced_at: string;
 }

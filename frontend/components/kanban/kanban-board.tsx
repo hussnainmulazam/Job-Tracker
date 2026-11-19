@@ -226,7 +226,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
       cand.name.toLowerCase().includes(q) ||
       cand.email.toLowerCase().includes(q) ||
       (cand.opening_title && cand.opening_title.toLowerCase().includes(q)) ||
-      cand.matched_skills.some((s) => s.toLowerCase().includes(q))
+      (cand.matched_skills && cand.matched_skills.some((s) => s.toLowerCase().includes(q)))
     );
   });
 

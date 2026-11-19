@@ -10,6 +10,17 @@ class GoogleAuthUrlResponse(BaseModel):
     state: str = Field(..., description="Secure CSRF state token encoding user session")
 
 
+class EmailSyncItemResult(BaseModel):
+    message_id: str
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    status: str = Field(..., description="Outcome: created, duplicate, or failed")
+    candidate_id: Optional[str] = None
+    candidate_name: Optional[str] = None
+    opening_title: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class GoogleAccountStatusResponse(BaseModel):
     is_connected: bool = Field(..., description="Whether recruiter has linked their Google account")
     email: Optional[str] = Field(default=None, description="Linked Google account email")
@@ -27,6 +38,8 @@ class GoogleAccountStatusResponse(BaseModel):
     default_opening_id: Optional[uuid.UUID] = Field(default=None, description="Default job opening for incoming resumes without subject match")
     default_opening_title: Optional[str] = Field(default=None, description="Title of default job opening")
     total_emails_synced: int = Field(default=0, description="Total resume emails processed")
+    synced_from_gmail_count: int = Field(default=0, description="Total candidates created from Gmail sync")
+    recent_sync_results: List[EmailSyncItemResult] = Field(default_factory=list, description="Recent sync outcomes per email")
 
 
 class GoogleAccountUpdateRequest(BaseModel):
@@ -41,6 +54,8 @@ class GmailSyncResponse(BaseModel):
     messages_processed: int = Field(..., description="New candidate messages processed")
     attachments_saved: int = Field(..., description="PDF/DOCX resumes extracted and stored")
     candidates_created: int = Field(..., description="Candidate profiles created in database")
+    synced_from_gmail_count: int = Field(default=0, description="Total candidates created from Gmail sync")
+    results: List[EmailSyncItemResult] = Field(default_factory=list, description="Per-email sync outcome details")
     errors: List[str] = Field(default_factory=list, description="Any warnings, failures, or rate limit notices encountered")
     last_synced_at: datetime = Field(..., description="Current sync timestamp")
 
