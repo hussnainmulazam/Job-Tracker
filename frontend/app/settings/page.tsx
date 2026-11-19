@@ -39,12 +39,10 @@ import {
   apiFetch,
   googleApi,
   jobOpeningsApi,
-  whatsappApi,
   healthApi,
   DbHealthResponse,
   GoogleAccountStatus,
   GmailSyncResponse,
-  WhatsAppStatusResponse,
   removeAuthToken,
 } from "@/lib/api";
 import { useTheme } from "@/components/theme-provider";
@@ -167,18 +165,6 @@ export default function SettingsPage() {
     queryFn: async () => {
       return googleApi.getStatus();
     },
-    retry: false,
-  });
-
-  // 5. Fetch WhatsApp Cloud API Status
-  const {
-    data: waStatus,
-    isLoading: isWaLoading,
-    isRefetching: isWaRefetching,
-    refetch: refetchWaStatus,
-  } = useQuery<WhatsAppStatusResponse>({
-    queryKey: ["whatsapp-status"],
-    queryFn: () => whatsappApi.getStatus(),
     retry: false,
   });
 
@@ -752,144 +738,6 @@ export default function SettingsPage() {
                     <ExternalLink className="h-3.5 w-3.5" />
                     <span>{connectMutation.isPending ? "Connecting..." : "Connect Google Workspace"}</span>
                   </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* WhatsApp Cloud API Integration */}
-        <Card className="border border-border shadow-xs">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>WhatsApp Cloud API Integration</span>
-                </CardTitle>
-                {waStatus?.valid ? (
-                  <Badge variant="outline" className="border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 text-[10px]">
-                    Connected &amp; Verified
-                  </Badge>
-                ) : waStatus?.is_expired ? (
-                  <Badge variant="destructive" className="text-[10px]">
-                    Token Expired
-                  </Badge>
-                ) : waStatus?.configured ? (
-                  <Badge variant="destructive" className="text-[10px]">
-                    Configuration Error
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" className="text-[10px]">
-                    Not Configured
-                  </Badge>
-                )}
-              </div>
-              <CardDescription className="text-xs text-muted-foreground">
-                Recruiter candidate messaging, automated status delivery, and 24-hour compliance tracking
-              </CardDescription>
-            </div>
-            <Button
-              id="btn-refresh-whatsapp-status"
-              variant="outline"
-              size="sm"
-              onClick={() => refetchWaStatus()}
-              disabled={isWaRefetching}
-              className="h-8 text-xs gap-1.5"
-            >
-              <RefreshCw className={`h-3 w-3 ${isWaRefetching ? "animate-spin" : ""}`} />
-              <span>Recheck Status</span>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Token Expired Alert Banner */}
-            {waStatus?.is_expired && (
-              <div className="p-3.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs space-y-1.5">
-                <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
-                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                  <span>Token expired, generate a new one from Meta App Dashboard and update WHATSAPP_TOKEN in .env</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Meta WhatsApp Cloud API developer access tokens expire after 24 hours. Generate a fresh temporary token from your Meta App Dashboard &gt; WhatsApp &gt; API Setup, or configure a permanent System User token, and restart the backend.
-                </p>
-                {waStatus.error_message && (
-                  <p className="font-mono text-[10.5px] p-1.5 rounded bg-background/50 border border-amber-500/20">
-                    {waStatus.error_message}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {isWaLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-full rounded-md" />
-                <Skeleton className="h-10 w-full rounded-md" />
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded-lg border bg-muted/20 space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Phone Number ID</span>
-                    <p className="font-mono font-semibold text-foreground text-xs">
-                      {waStatus?.phone_number_id || "1476230845569922"}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-muted/20 space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Verified Display Name</span>
-                    <p className="font-semibold text-foreground text-xs">
-                      {waStatus?.verified_name || "Jasper's Market (Meta Test App)"}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-muted/20 space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Sender Display Phone</span>
-                    <p className="font-semibold text-foreground text-xs">
-                      {waStatus?.display_phone_number || "+1 555-0199"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Quality Rating</span>
-                    <div>
-                      <Badge variant="outline" className="text-[10px] font-medium border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
-                        {waStatus?.quality_rating || "GREEN / HIGH"}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Default Approved Template</span>
-                    <p className="font-mono font-medium text-foreground text-xs">
-                      {waStatus?.default_template || "hello_world"}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">24-Hour Policy Window</span>
-                    <p className="font-medium text-emerald-600 dark:text-emerald-400 text-xs">
-                      Active Enforcement
-                    </p>
-                  </div>
-                </div>
-
-                {/* Webhook Configuration Details */}
-                <div className="p-3 rounded-lg border bg-muted/10 space-y-2 text-xs">
-                  <span className="font-semibold text-foreground text-xs flex items-center gap-1.5">
-                    <KeyRound className="h-3.5 w-3.5 text-primary" />
-                    Webhook Configuration &amp; Verification
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                    <div>
-                      <span className="text-muted-foreground">Callback URL: </span>
-                      <code className="bg-background px-1.5 py-0.5 rounded border font-mono">http://localhost:8000/whatsapp/webhook</code>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Verify Token: </span>
-                      <code className="bg-background px-1.5 py-0.5 rounded border font-mono">job_tracker_whatsapp_verify_token_2026</code>
-                    </div>
-                  </div>
-                  <p className="text-[10.5px] text-muted-foreground pt-1">
-                    Meta delivers candidate inbound messages and status receipts (sent, delivered, read, failed) via HMAC-SHA256 signature verification.
-                  </p>
                 </div>
               </div>
             )}

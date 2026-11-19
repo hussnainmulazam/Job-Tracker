@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatTime, formatDateTime } from "@/lib/format-date";
 import {
-  MessageSquare,
+  Mail,
   Search,
   Send,
   Sparkles,
@@ -16,9 +16,6 @@ import {
   AlertCircle,
   RefreshCw,
   User,
-  ShieldCheck,
-  ShieldAlert,
-  Calendar,
   Briefcase,
   ChevronRight,
   Filter,
@@ -32,10 +29,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { useToast } from "@/components/ui/use-toast";
 import {
-  whatsappApi,
-  WhatsAppConversationSummary,
-  WhatsAppThreadResponse,
-  WhatsAppMessageRead,
+  googleApi,
+  EmailConversationSummary,
+  EmailThreadResponse,
+  EmailMessageItem,
 } from "@/lib/api";
 import { ContactCandidateDialog } from "@/components/candidates/contact-candidate-dialog";
 
@@ -47,11 +44,12 @@ function InboxContent() {
   const { toast } = useToast();
 
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(initialCandidateId);
-  const [filterStatus, setFilterStatus] = useState<"all" | "awaiting_reply" | "window_open">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "awaiting_reply">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [replyText, setReplyText] = useState("");
+  const [replySubject, setReplySubject] = useState("");
   const [isDraftingAI, setIsDraftingAI] = useState(false);
-  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -63,9 +61,9 @@ function InboxContent() {
     error: errorConvs,
     refetch: refetchConvs,
   } = useQuery({
-    queryKey: ["whatsapp-conversations", filterStatus],
-    queryFn: () => whatsappApi.listConversations(filterStatus),
-    refetchInterval: 10000,
+    queryKey: ["email-conversations", filterStatus],
+    queryFn: () => googleApi.listConversations(filterStatus),
+    refetchInterval: 12000,
   });
 
   const conversations = conversationsData?.conversations || [];
@@ -92,10 +90,10 @@ function InboxContent() {
     isLoading: isLoadingThread,
     refetch: refetchThread,
   } = useQuery({
-    queryKey: ["whatsapp-thread", selectedCandidateId],
-    queryFn: () => whatsappApi.getThread(selectedCandidateId!),
+    queryKey: ["email-thread", selectedCandidateId],
+    queryFn: () => (selectedCandidateId ? googleApi.getThread(selectedCandidateId) : Promise.reject("No candidate")),
     enabled: !!selectedCandidateId,
-    refetchInterval: 5000,
+    refetchInterval: 6000,
   });
 
   const selectedConv = conversations.find((c) => c.candidate_id === selectedCandidateId);
@@ -105,27 +103,29 @@ function InboxContent() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [threadData?.messages]);
 
-  // Send message mutation
+  // Send reply mutation
   const sendMutation = useMutation({
     mutationFn: (text: string) =>
-      whatsappApi.sendFreeform({
+      googleApi.sendReply({
         candidate_id: selectedCandidateId!,
         message: text,
+        subject: replySubject.trim() || undefined,
       }),
     onSuccess: () => {
       setReplyText("");
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-thread", selectedCandidateId] });
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-conversations"] });
+      setReplySubject("");
+      queryClient.invalidateQueries({ queryKey: ["email-thread", selectedCandidateId] });
+      queryClient.invalidateQueries({ queryKey: ["email-conversations"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       toast({
-        title: "Message Sent",
-        description: "Your reply was transmitted via WhatsApp Cloud API.",
+        title: "Email Sent Successfully",
+        description: "Your reply was transmitted via Gmail API.",
       });
     },
     onError: (err: any) => {
       toast({
-        title: "Failed to send message",
-        description: err.message || "24-hour customer service window may have closed.",
+        title: "Failed to send email",
+        description: err.response?.data?.detail || err.message || "Could not dispatch email.",
         variant: "destructive",
       });
     },
@@ -136,19 +136,22 @@ function InboxContent() {
     if (!selectedCandidateId) return;
     setIsDraftingAI(true);
     try {
-      const res = await whatsappApi.aiDraft({
+      const res = await googleApi.aiDraftReply({
         candidate_id: selectedCandidateId,
         instructions: "Draft a polite, professional recruiting follow-up acknowledging candidate's status.",
       });
       setReplyText(res.drafted_message);
+      if (res.drafted_subject) {
+        setReplySubject(res.drafted_subject);
+      }
       toast({
         title: "AI Draft Ready",
-        description: "Review and edit the proposed reply before clicking Send.",
+        description: "Review and edit the proposed email before clicking Send.",
       });
     } catch (err: any) {
       toast({
         title: "AI Draft failed",
-        description: err.message || "Failed to generate suggested response.",
+        description: err.message || "Failed to generate AI response.",
         variant: "destructive",
       });
     } finally {
@@ -156,185 +159,147 @@ function InboxContent() {
     }
   };
 
-  // Filter conversations by search query
+  const handleSelectConversation = (cid: string) => {
+    setSelectedCandidateId(cid);
+    router.replace(`/inbox?candidate_id=${cid}`, { scroll: false });
+  };
+
   const filteredConversations = conversations.filter((c) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
     return (
       c.candidate_name.toLowerCase().includes(q) ||
-      c.candidate_email.toLowerCase().includes(q) ||
-      (c.opening_title && c.opening_title.toLowerCase().includes(q)) ||
-      (c.last_message_body && c.last_message_body.toLowerCase().includes(q))
+      (c.candidate_email && c.candidate_email.toLowerCase().includes(q)) ||
+      (c.opening_title && c.opening_title.toLowerCase().includes(q))
     );
   });
 
   return (
-    <div className="flex h-[calc(100vh-6.5rem)] rounded-2xl border border-border bg-card overflow-hidden shadow-xs">
-      {/* ── Left Pane: Conversation Threads ───────────────────────── */}
-      <div className="w-80 sm:w-96 border-r border-border flex flex-col shrink-0 bg-muted/10">
-        {/* Top Header & Search */}
-        <div className="p-3.5 border-b border-border space-y-3">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background">
+      {/* ── Left Sidebar: Conversations List ──────────────────────────────── */}
+      <div className="w-80 md:w-96 flex flex-col border-r border-border bg-card shrink-0">
+        {/* Header */}
+        <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              <h2 className="text-sm font-bold text-foreground">Candidate Inbox</h2>
+              <Mail className="w-5 h-5 text-primary" />
+              <h1 className="font-semibold text-lg">Recruiting Inbox</h1>
             </div>
             {awaitingReplyCount > 0 && (
-              <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400">
-                {awaitingReplyCount} awaiting reply
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                {awaitingReplyCount} unread
               </span>
             )}
           </div>
 
+          {/* Search */}
           <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search chats, candidates..."
+              placeholder="Search candidate emails..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 pl-8 text-xs bg-background"
+              className="pl-9 h-9 text-xs"
             />
           </div>
 
           {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <button
+          <div className="flex gap-1.5 text-xs">
+            <Button
+              size="sm"
+              variant={filterStatus === "all" ? "default" : "outline"}
+              className="h-7 text-xs px-2.5 rounded-full"
               onClick={() => setFilterStatus("all")}
-              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                filterStatus === "all"
-                  ? "bg-foreground text-background font-semibold shadow-xs"
-                  : "bg-muted/60 text-muted-foreground hover:text-foreground"
-              }`}
             >
               All
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
+              variant={filterStatus === "awaiting_reply" ? "default" : "outline"}
+              className="h-7 text-xs px-2.5 rounded-full"
               onClick={() => setFilterStatus("awaiting_reply")}
-              className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center gap-1 ${
-                filterStatus === "awaiting_reply"
-                  ? "bg-rose-600 text-white font-semibold shadow-xs"
-                  : "bg-muted/60 text-muted-foreground hover:text-foreground"
-              }`}
             >
-              <span>Awaiting Reply</span>
+              Awaiting Reply
               {awaitingReplyCount > 0 && (
-                <span className="text-[9.5px] px-1 rounded-full bg-rose-700 text-white">
+                <span className="ml-1 text-[10px] px-1.5 py-0.2 bg-amber-500 text-white rounded-full">
                   {awaitingReplyCount}
                 </span>
               )}
-            </button>
-            <button
-              onClick={() => setFilterStatus("window_open")}
-              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                filterStatus === "window_open"
-                  ? "bg-emerald-600 text-white font-semibold shadow-xs"
-                  : "bg-muted/60 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Window Open
-            </button>
+            </Button>
           </div>
         </div>
 
-        {/* Conversations List */}
+        {/* Conversation List */}
         <div className="flex-1 overflow-y-auto divide-y divide-border/60">
           {isLoadingConvs ? (
-            <div className="p-3 space-y-3">
+            <div className="p-4 space-y-4">
               {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex gap-3">
-                  <Skeleton className="h-10 w-10 rounded-full shrink-0" />
-                  <div className="flex-1 space-y-1.5">
-                    <Skeleton className="h-3.5 w-24" />
-                    <Skeleton className="h-3 w-40" />
+                <div key={i} className="flex gap-3 items-center">
+                  <Skeleton className="w-10 h-10 rounded-full shrink-0" />
+                  <div className="space-y-1.5 flex-1">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
                   </div>
                 </div>
               ))}
             </div>
           ) : isErrorConvs ? (
-            <div className="p-4">
+            <div className="p-6">
               <ErrorState
-                title="Could not load conversations"
-                message={(errorConvs as Error)?.message || "Failed to load candidate threads."}
+                title="Failed to load conversations"
+                message={(errorConvs as any)?.message || "Please check your network and retry."}
                 onRetry={() => refetchConvs()}
               />
             </div>
           ) : filteredConversations.length === 0 ? (
-            <div className="p-6 text-center">
-              <MessageSquare className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-foreground">No conversations found</p>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {filterStatus === "awaiting_reply"
-                  ? "All candidate inquiries have been answered!"
-                  : "Inbound messages from WhatsApp will appear here."}
-              </p>
+            <div className="p-6">
+              <EmptyState
+                icon={Mail}
+                title="No email conversations found"
+                description={
+                  searchQuery
+                    ? "Try adjusting your search query."
+                    : "Incoming emails synced from Gmail will appear here."
+                }
+              />
             </div>
           ) : (
             filteredConversations.map((conv) => {
               const isSelected = conv.candidate_id === selectedCandidateId;
-              const timeStr = formatTime(conv.last_message_at);
-
               return (
                 <button
                   key={conv.candidate_id}
-                  onClick={() => {
-                    setSelectedCandidateId(conv.candidate_id);
-                    router.push(`/inbox?candidate_id=${conv.candidate_id}`, { scroll: false });
-                  }}
-                  className={`w-full text-left p-3 flex items-start gap-3 transition-colors ${
-                    isSelected
-                      ? "bg-accent/80 border-l-3 border-primary"
-                      : "hover:bg-muted/40"
+                  onClick={() => handleSelectConversation(conv.candidate_id)}
+                  className={`w-full text-left p-3.5 transition flex gap-3 items-start hover:bg-muted/40 ${
+                    isSelected ? "bg-muted border-l-4 border-primary" : ""
                   }`}
                 >
                   {/* Avatar */}
-                  <div className="relative shrink-0">
-                    <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
-                      {conv.candidate_name.charAt(0).toUpperCase()}
-                    </div>
-                    {conv.care_window_open && (
-                      <span
-                        className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background"
-                        title="24h Care Window Active"
-                      />
-                    )}
+                  <div className="w-9 h-9 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center shrink-0 text-sm">
+                    {conv.candidate_name.charAt(0).toUpperCase()}
                   </div>
 
-                  {/* Snippet */}
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-foreground truncate">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 mb-0.5">
+                      <span className="font-semibold text-sm truncate text-foreground">
                         {conv.candidate_name}
                       </span>
-                      {timeStr && (
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {timeStr}
+                      {conv.last_message_at && (
+                        <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                          {formatTime(conv.last_message_at)}
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {conv.opening_title || "General Candidate"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground line-clamp-1 italic">
+
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1 truncate">
+                      <span className="truncate">{conv.opening_title || "General Application"}</span>
+                      <span>•</span>
+                      <span className="capitalize">{conv.candidate_stage}</span>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground truncate line-clamp-1">
                       {conv.last_message_body || "No messages yet"}
                     </p>
-
-                    {/* Badges */}
-                    <div className="flex items-center gap-1.5 pt-1">
-                      {conv.awaiting_reply && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-sm bg-rose-500/15 text-rose-600 dark:text-rose-400">
-                          Awaiting reply
-                        </span>
-                      )}
-                      {conv.care_window_open ? (
-                        <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-sm bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                          24h Window
-                        </span>
-                      ) : (
-                        <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground">
-                          Closed
-                        </span>
-                      )}
-                    </div>
                   </div>
                 </button>
               );
@@ -343,144 +308,106 @@ function InboxContent() {
         </div>
       </div>
 
-      {/* ── Right Pane: Active Chat Thread ────────────────────────── */}
-      <div className="flex-1 flex flex-col bg-background min-w-0">
-        {!selectedCandidateId ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <MessageSquare className="h-10 w-10 text-muted-foreground/30 mb-3" />
-            <h3 className="text-sm font-bold text-foreground">Select a Candidate Conversation</h3>
-            <p className="text-xs text-muted-foreground max-w-sm mt-1">
-              Choose a thread from the list on the left to read candidate messages, inspect 24h service window status, and respond.
-            </p>
-          </div>
-        ) : (
+      {/* ── Right Panel: Chat Thread View ─────────────────────────────────── */}
+      <div className="flex-1 flex flex-col bg-background overflow-hidden">
+        {selectedCandidateId ? (
           <>
             {/* Thread Header */}
-            <div className="h-14 px-4 border-b border-border flex items-center justify-between shrink-0 bg-card/60 backdrop-blur-xs">
+            <div className="p-4 border-b border-border bg-card flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
-                  {selectedConv?.candidate_name ? selectedConv.candidate_name.charAt(0).toUpperCase() : "C"}
+                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center shrink-0">
+                  {threadData?.candidate_name?.charAt(0).toUpperCase() || "C"}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-xs font-bold text-foreground truncate">
-                    {selectedConv?.candidate_name || threadData?.candidate_name || "Candidate"}
-                  </h3>
-                  <p className="text-[10.5px] text-muted-foreground truncate">
-                    {selectedConv?.candidate_phone || selectedConv?.candidate_email || "Candidate"} •{" "}
-                    {selectedConv?.opening_title || "General Candidate"}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-semibold text-base truncate">
+                      {threadData?.candidate_name || "Candidate Email Thread"}
+                    </h2>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-muted font-mono capitalize">
+                      {threadData?.candidate_stage || "Applied"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground flex items-center gap-2">
+                    <span>{threadData?.candidate_email || "No email"}</span>
+                    <span>•</span>
+                    <span>{threadData?.opening_title || "Job Requisition"}</span>
+                  </div>
                 </div>
               </div>
 
+              {/* Header Actions */}
               <div className="flex items-center gap-2">
-                {/* 24h Care Window Status Pill */}
-                {threadData?.care_window_open ? (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>24h Session Active</span>
-                    {threadData.seconds_remaining && (
-                      <span className="font-mono text-[10px]">
-                        ({Math.round(threadData.seconds_remaining / 3600)}h left)
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                    <Clock className="h-3 w-3" />
-                    <span>24h Window Closed</span>
-                  </div>
-                )}
-
-                {/* WhatsApp Opt-in Pill */}
-                {threadData?.whatsapp_opt_in ? (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold">
-                    Opted-in
-                  </span>
-                ) : (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
-                    No Opt-in
-                  </span>
-                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsEmailModalOpen(true)}
+                  className="text-xs gap-1.5"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Compose New Email
+                </Button>
+                <Link href={`/pipeline?candidate_id=${selectedCandidateId}`}>
+                  <Button size="sm" variant="outline" className="text-xs gap-1">
+                    Pipeline
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Button>
+                </Link>
               </div>
             </div>
 
-            {/* Messages Scroll Area */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-muted/5">
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {isLoadingThread ? (
-                <div className="space-y-3">
-                  {[1, 2, 3, 4].map((i) => (
-                    <Skeleton
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <div
                       key={i}
-                      className={`h-12 w-2/3 rounded-2xl ${
-                        i % 2 === 0 ? "ml-auto" : "mr-auto"
-                      }`}
-                    />
+                      className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}
+                    >
+                      <Skeleton className="w-64 h-16 rounded-2xl" />
+                    </div>
                   ))}
                 </div>
-              ) : !threadData?.messages || threadData.messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
-                  <MessageSquare className="h-8 w-8 mb-2 opacity-40" />
-                  <p className="text-xs font-semibold text-foreground">No message history yet</p>
-                  <p className="text-[11px] max-w-xs mt-0.5">
-                    Send an approved template message to initiate communication on WhatsApp.
-                  </p>
+              ) : !threadData || threadData.messages.length === 0 ? (
+                <div className="py-16">
+                  <EmptyState
+                    icon={Mail}
+                    title="No emails yet"
+                    description="Incoming candidate replies synced from Gmail or outgoing notifications will appear in this thread."
+                    actionText="Send First Email"
+                    onAction={() => setIsEmailModalOpen(true)}
+                  />
                 </div>
               ) : (
-                threadData.messages.map((msg: WhatsAppMessageRead) => {
-                  const isInbound = msg.direction === "inbound";
-                  const timeDisplay = formatTime(msg.created_at);
-
+                threadData.messages.map((msg: EmailMessageItem) => {
+                  const isOutbound = msg.direction === "outbound";
                   return (
                     <div
                       key={msg.id}
-                      className={`flex flex-col ${isInbound ? "items-start" : "items-end"}`}
+                      className={`flex flex-col ${isOutbound ? "items-end" : "items-start"}`}
                     >
                       <div
-                        className={`max-w-[75%] rounded-2xl p-3 text-xs shadow-2xs ${
-                          isInbound
-                            ? "bg-card border border-border text-foreground rounded-tl-xs"
-                            : "bg-primary text-primary-foreground rounded-tr-xs"
+                        className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                          isOutbound
+                            ? "bg-primary text-primary-foreground rounded-tr-none"
+                            : "bg-muted text-foreground rounded-tl-none border border-border"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap leading-relaxed">{msg.body}</p>
+                        {msg.subject && (
+                          <div className="text-xs font-semibold pb-1.5 mb-1.5 border-b border-current/20 opacity-90">
+                            {msg.subject}
+                          </div>
+                        )}
+                        <p className="whitespace-pre-wrap">{msg.body}</p>
                         <div
-                          className={`flex items-center justify-end gap-1 mt-1 text-[9.5px] ${
-                            isInbound
-                              ? "text-muted-foreground"
-                              : "text-primary-foreground/75"
+                          className={`mt-1.5 text-[10px] flex items-center justify-end gap-1 opacity-70 ${
+                            isOutbound ? "text-primary-foreground" : "text-muted-foreground"
                           }`}
                         >
-                          <span>{timeDisplay}</span>
-                          {!isInbound && (
-                            <span>
-                              {msg.status === "read" ? (
-                                <span title="Read by candidate">
-                                  <CheckCheck className="h-3 w-3 text-emerald-300" />
-                                </span>
-                              ) : msg.status === "delivered" ? (
-                                <span title="Delivered to device">
-                                  <CheckCheck className="h-3 w-3 text-primary-foreground/80" />
-                                </span>
-                              ) : msg.status === "sent" ? (
-                                <span title="Sent by Meta">
-                                  <Check className="h-3 w-3 text-primary-foreground/70" />
-                                </span>
-                              ) : msg.status === "failed" ? (
-                                <span className="inline-flex items-center gap-0.5 text-rose-300 font-semibold" title={msg.error_message || "Delivery failed"}>
-                                  <AlertCircle className="h-3 w-3" />
-                                  <span>Failed</span>
-                                </span>
-                              ) : null}
-                            </span>
-                          )}
+                          <span>{formatTime(msg.sent_at || msg.created_at)}</span>
+                          {isOutbound && <CheckCheck className="w-3 h-3" />}
                         </div>
                       </div>
-                      {msg.status === "failed" && msg.error_message && (
-                        <div className="mt-1 max-w-[75%] p-2 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-[10.5px] leading-snug">
-                          <span className="font-bold">Error Notice: </span>
-                          <span>{msg.error_message}</span>
-                        </div>
-                      )}
                     </div>
                   );
                 })
@@ -488,100 +415,86 @@ function InboxContent() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Reply Input Box */}
-            <div className="p-3 border-t border-border bg-card">
-              {threadData?.care_window_open ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-muted-foreground flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span>Direct 24-hour reply window is open</span>
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleAIDraft}
-                      disabled={isDraftingAI}
-                      className="h-6 text-[10.5px] gap-1 text-primary hover:text-primary"
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      <span>{isDraftingAI ? "Drafting with AI..." : "Ask AI to Draft Reply"}</span>
-                    </Button>
-                  </div>
-                  <div className="flex gap-2">
-                    <Textarea
-                      placeholder="Type your reply here..."
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      rows={2}
-                      className="text-xs resize-none bg-background"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          if (replyText.trim()) sendMutation.mutate(replyText.trim());
-                        }
-                      }}
+            {/* Reply Bar */}
+            <div className="p-4 border-t border-border bg-card space-y-3">
+              <div className="flex items-center justify-between">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleAIDraft}
+                  disabled={isDraftingAI}
+                  className="text-xs text-primary hover:text-primary gap-1.5 h-7 px-2 font-medium"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {isDraftingAI ? "Drafting with AI..." : "AI Draft Reply"}
+                </Button>
+                <span className="text-[11px] text-muted-foreground">
+                  Sending from connected Gmail account
+                </span>
+              </div>
+
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 space-y-1.5">
+                  {replySubject && (
+                    <Input
+                      placeholder="Subject line..."
+                      value={replySubject}
+                      onChange={(e) => setReplySubject(e.target.value)}
+                      className="text-xs h-8"
                     />
-                    <Button
-                      id="btn-send-whatsapp-reply"
-                      onClick={() => replyText.trim() && sendMutation.mutate(replyText.trim())}
-                      disabled={!replyText.trim() || sendMutation.isPending}
-                      className="h-auto px-4 gap-1.5 text-xs font-semibold shrink-0"
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                      <span>Send</span>
-                    </Button>
-                  </div>
+                  )}
+                  <Textarea
+                    placeholder="Type your reply to candidate... (Shift+Enter for new line)"
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (replyText.trim()) sendMutation.mutate(replyText);
+                      }
+                    }}
+                    rows={2}
+                    className="resize-none text-sm leading-relaxed"
+                  />
                 </div>
-              ) : (
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
-                    <Clock className="h-4 w-4 shrink-0" />
-                    <span>
-                      24-hour customer care window is closed. Candidate must reply first or you may send an approved WhatsApp Template message.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      id="btn-open-template-dialog"
-                      size="sm"
-                      onClick={() => setIsTemplateModalOpen(true)}
-                      className="h-7 text-xs font-semibold gap-1.5"
-                    >
-                      <MessageSquare className="h-3 w-3" />
-                      <span>Send Template Message</span>
-                    </Button>
-                    <Link href={`/pipeline?candidate_id=${selectedCandidateId}`}>
-                      <Button size="sm" variant="outline" className="h-7 text-xs font-semibold shrink-0">
-                        View in Pipeline
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              )}
+                <Button
+                  onClick={() => sendMutation.mutate(replyText)}
+                  disabled={sendMutation.isPending || !replyText.trim()}
+                  className="h-10 px-4 gap-1.5 shrink-0"
+                >
+                  {sendMutation.isPending ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  Send
+                </Button>
+              </div>
             </div>
           </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-8">
+            <EmptyState
+              icon={Mail}
+              title="Select a conversation"
+              description="Choose a candidate from the left pane to view email communication history and send replies."
+            />
+          </div>
         )}
       </div>
 
+      {/* Modal: Email Candidate Dialog */}
       {selectedConv && (
         <ContactCandidateDialog
-          open={isTemplateModalOpen}
-          onOpenChange={setIsTemplateModalOpen}
-          candidate={
-            {
-              id: selectedConv.candidate_id,
-              name: selectedConv.candidate_name,
-              email: selectedConv.candidate_email,
-              phone: selectedConv.candidate_phone,
-              opening_id: selectedConv.opening_id,
-              opening_title: selectedConv.opening_title,
-              stage: selectedConv.candidate_stage,
-              score: selectedConv.candidate_score,
-              whatsapp_opt_in: selectedConv.whatsapp_opt_in,
-            } as any
-          }
-          initialChannel="whatsapp"
+          open={isEmailModalOpen}
+          onOpenChange={setIsEmailModalOpen}
+          candidate={{
+            id: selectedConv.candidate_id,
+            name: selectedConv.candidate_name,
+            email: selectedConv.candidate_email,
+            opening_title: selectedConv.opening_title || undefined,
+            stage: selectedConv.candidate_stage as any,
+          } as any}
         />
       )}
     </div>
@@ -590,15 +503,8 @@ function InboxContent() {
 
 export default function InboxPage() {
   return (
-    <AppShell title="Unified Inbox">
-      <Suspense
-        fallback={
-          <div className="h-[calc(100vh-6.5rem)] rounded-2xl border border-border p-6 flex gap-4">
-            <Skeleton className="w-80 h-full rounded-xl" />
-            <Skeleton className="flex-1 h-full rounded-xl" />
-          </div>
-        }
-      >
+    <AppShell>
+      <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading inbox...</div>}>
         <InboxContent />
       </Suspense>
     </AppShell>

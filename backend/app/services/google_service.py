@@ -945,6 +945,13 @@ class GoogleService:
                             details=f"Candidate {new_candidate.name} ingested from Gmail message '{subject}'.",
                         )
 
+                        # Auto-check scoring & dispatch auto-acknowledgement email
+                        try:
+                            from app.services.candidate_service import candidate_service
+                            candidate_service.auto_handle_candidate_received(self.session, user_id, new_candidate)
+                        except Exception as auto_flow_err:
+                            logger.warning("Auto scoring / auto email failed for %s: %s", new_candidate.id, auto_flow_err)
+
                         results.append(
                             EmailSyncItemResult(
                                 message_id=msg_id,

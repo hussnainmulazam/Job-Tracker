@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from app.models.candidate import CandidateStage
 from app.schemas.scorecard import ScorecardRead
 from app.schemas.extractor import CandidateLinkRead
-from app.schemas.whatsapp import WhatsAppMessageRead
+from app.schemas.message import MessageRead
 from app.schemas.scheduling import InterviewRead, SchedulingLinkRead
 from app.schemas.audit_log import AuditLogRead
 
@@ -179,7 +179,7 @@ class CandidateDataExportResponse(BaseModel):
     candidate: CandidateRead
     links: List[CandidateLinkRead] = Field(default_factory=list)
     scorecards: List[ScorecardRead] = Field(default_factory=list)
-    messages: List[WhatsAppMessageRead] = Field(default_factory=list)
+    messages: List[MessageRead] = Field(default_factory=list)
     interviews: List[InterviewRead] = Field(default_factory=list)
     scheduling_links: List[SchedulingLinkRead] = Field(default_factory=list)
     audit_trail: List[AuditLogRead] = Field(default_factory=list)

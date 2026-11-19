@@ -41,7 +41,7 @@ from app.schemas.scheduling import (
     WorkingBlock,
 )
 from app.services.google_service import GoogleService
-from app.services.whatsapp_service import whatsapp_service
+from app.schemas.google import GoogleSendEmailRequest
 
 logger = logging.getLogger(__name__)
 
@@ -1044,10 +1044,10 @@ class SchedulingService:
         event_type: str,  # "confirmation" | "reschedule" | "cancellation" | "reminder_24h" | "reminder_1h"
     ) -> None:
         """
-        Sends WhatsApp template message if candidate is opted-in, and logs confirmation email.
+        Dispatches interview notification email to candidate and interviewer via GoogleService (Gmail).
         """
-        if not candidate or not candidate.phone:
-            logger.info("Candidate has no phone number, skipping WhatsApp interview %s", event_type)
+        if not candidate or not candidate.email:
+            logger.info("Candidate has no email, skipping interview email notification for %s", event_type)
             return
 
         # Format date & time for human in interview timezone
@@ -1060,45 +1060,48 @@ class SchedulingService:
         date_str = local_dt.strftime("%A, %b %d at %I:%M %p (%Z)")
         job_title = opening.title if opening else "Position"
 
-        # Check candidate opt-in
-        if candidate.whatsapp_opt_in:
-            try:
-                variables = {
-                    "candidate_name": candidate.name,
-                    "job_title": job_title,
-                    "interview_date": date_str,
-                    "meet_link": interview.meet_link or "Google Meet",
-                }
+        meet_text = f"Google Meet Link: {interview.meet_link}" if interview.meet_link else "Meeting details will follow."
 
-                # Use pre-approved template recruitment_interview_invitation
-                template_name = "recruitment_interview_invitation"
-                if event_type == "cancellation":
-                    template_name = "recruitment_stage_update"
-                    variables = {
-                        "candidate_name": candidate.name,
-                        "job_title": job_title,
-                        "current_stage": "Interview Cancelled",
-                        "next_steps": "Please contact HR if you wish to reschedule.",
-                    }
+        if event_type == "confirmation":
+            subject = f"Confirmed: Interview for {job_title} on {date_str}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Your interview for the {job_title} position has been scheduled for {date_str}.\n\n"
+                f"{meet_text}\n\n"
+                f"If you need to reschedule or cancel, you can do so through your scheduling link.\n\n"
+                f"Best regards,\nRecruiting Team"
+            )
+        elif event_type == "reschedule":
+            subject = f"Rescheduled: Interview for {job_title} on {date_str}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Your interview for the {job_title} position has been rescheduled to {date_str}.\n\n"
+                f"{meet_text}\n\n"
+                f"Best regards,\nRecruiting Team"
+            )
+        else: # cancellation
+            subject = f"Cancelled: Interview for {job_title}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Your interview for the {job_title} position scheduled for {date_str} has been cancelled.\n\n"
+                f"Please reach out if you would like to reschedule.\n\n"
+                f"Best regards,\nRecruiting Team"
+            )
 
-                await whatsapp_service.send_template_message(
-                    session=session,
+        try:
+            google_svc = GoogleService(session)
+            google_svc.send_email(
+                user_id=interview.user_id,
+                request=GoogleSendEmailRequest(
                     candidate_id=candidate.id,
-                    user_id=interview.user_id,
-                    template_name=template_name,
-                    variables=variables,
-                )
-                logger.info("Sent WhatsApp %s notification for interview %s", event_type, interview.id)
-            except Exception as exc:
-                logger.warning("Failed to dispatch WhatsApp %s: %s", event_type, exc)
-
-        logger.info(
-            "Dispatched %s email notification to candidate %s (%s) and interviewer %s",
-            event_type,
-            candidate.name,
-            candidate.email,
-            interview.interviewer_email,
-        )
+                    subject=subject,
+                    body=body,
+                    template_name=f"interview_{event_type}",
+                ),
+            )
+            logger.info("Sent %s email via Gmail to %s for interview %s", event_type, candidate.email, interview.id)
+        except Exception as exc:
+            logger.warning("Could not dispatch Gmail notification for interview %s: %s", interview.id, exc)
 
     # ── 9. List & Read Helpers ────────────────────────────────────────────────
 

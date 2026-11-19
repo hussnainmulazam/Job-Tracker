@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class OutreachDraftRequest(BaseModel):
     candidate_id: uuid.UUID
-    channel: str = Field(default="whatsapp", description="'whatsapp' or 'email'")
+    channel: str = Field(default="email", description="'email'")
     language: str = Field(default="english", description="'english' or 'hinglish'")
     instructions: Optional[str] = Field(
         default=None,

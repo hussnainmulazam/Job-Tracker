@@ -344,6 +344,21 @@ def extract_address_heuristic(text: str) -> Tuple[Optional[str], float, str]:
     return (None, 0.0, "heuristic")
 
 
+def extract_regex_fields(text: str) -> Dict[str, Tuple[Optional[str], float, str]]:
+    """Helper for regex extraction tests and deterministic field verification."""
+    email_val, _, email_conf, email_src = extract_emails_regex(text)
+    phone_val, _, phone_conf, phone_src = extract_phones_regex(text)
+    urls = extract_urls_regex(text)
+    return {
+        "email": (email_val, email_conf, email_src),
+        "phone": (phone_val, phone_conf, phone_src),
+        "github_url": urls.get("github_url", (None, 0.0, "regex")),
+        "linkedin_url": urls.get("linkedin_url", (None, 0.0, "regex")),
+        "kaggle_url": urls.get("kaggle_url", (None, 0.0, "regex")),
+        "portfolio_url": urls.get("portfolio_url", (None, 0.0, "regex")),
+    }
+
+
 # ── 6. Deterministic Heuristic + LLM Gap Pipeline ────────────────────────────
 
 def extract_all_deterministic_fields(cv_text: str) -> Dict[str, Any]:

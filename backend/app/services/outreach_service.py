@@ -43,7 +43,7 @@ from app.services.ai_router import ai_router
 from app.services.audit_log_service import audit_log_service
 from app.services.google_service import GoogleService
 from app.services.scheduling_service import scheduling_service
-from app.services.whatsapp_service import normalize_phone_number, whatsapp_service
+from app.schemas.google import GoogleSendEmailRequest
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class OutreachService:
         session: Session,
         user_id: uuid.UUID,
         candidate_id: uuid.UUID,
-        channel: str = "whatsapp",
+        channel: str = "email",
         language: str = "english",
         instructions: Optional[str] = None,
     ) -> OutreachDraftResponse:
@@ -427,82 +427,24 @@ class OutreachService:
         send_error: Optional[str] = None
         send_success = False
 
-        if channel == "whatsapp":
-            # Attempt dispatch via WhatsApp
-            if not candidate.phone:
-                send_error = "Candidate has no phone number on file for WhatsApp outreach."
-            else:
-                try:
-                    norm_phone = normalize_phone_number(candidate.phone)
-                    # Check 24h care window
-                    is_within_24h = False
-                    if candidate.last_inbound_whatsapp_at:
-                        time_since = (now_utc - candidate.last_inbound_whatsapp_at).total_seconds()
-                        is_within_24h = time_since < 24 * 3600
-
-                    if is_within_24h:
-                        # Send freeform message
-                        await whatsapp_service.send_freeform_message(
-                            session=session,
-                            candidate_id=candidate.id,
-                            user_id=user_id,
-                            text_body=msg.body,
-                        )
-                        send_success = True
-                    else:
-                        # Outside 24h window: send approved template with scheduling link
-                        scheduling_url = vars_dict.get("scheduling_url") or f"{settings.FRONTEND_URL}/schedule"
-                        opening = session.exec(select(JobOpening).where(JobOpening.id == candidate.opening_id)).first()
-                        job_title = opening.title if opening else "Position"
-
-                        # Ensure opt-in flag is enabled
-                        if not candidate.whatsapp_opt_in:
-                            candidate.whatsapp_opt_in = True
-                            session.add(candidate)
-                            session.commit()
-
-                        template_vars = {
-                            "candidate_name": candidate.name,
-                            "job_title": job_title,
-                            "interview_date": "Next Available Window",
-                            "meet_link": scheduling_url,
-                        }
-
-                        await whatsapp_service.send_template_message(
-                            session=session,
-                            candidate_id=candidate.id,
-                            user_id=user_id,
-                            template_name="recruitment_interview_invitation",
-                            language_code="en_US",
-                            variables=template_vars,
-                        )
-                        send_success = True
-
-                except Exception as exc:
-                    send_error = str(exc)
-                    logger.warning("WhatsApp outreach failed for message %s: %s", msg.id, exc)
-
-        elif channel == "email":
-            # Attempt dispatch via Gmail API
-            if not candidate.email:
-                send_error = "Candidate has no email address on file."
-            else:
-                try:
-                    google_service = GoogleService(session)
-                    subject = vars_dict.get("subject") or "Interview Invitation"
-                    email_req = GoogleSendEmailRequest(
-                        to=candidate.email,
-                        subject=subject,
-                        body=msg.body,
-                        candidate_id=candidate.id,
-                    )
-                    google_service.send_email(user_id=user_id, request=email_req)
-                    send_success = True
-                except Exception as exc:
-                    send_error = str(exc)
-                    logger.warning("Email outreach failed for message %s: %s", msg.id, exc)
+        # Dispatch via Gmail API
+        if not candidate.email:
+            send_error = "Candidate has no email address on file."
         else:
-            send_error = f"Unsupported channel '{channel}'."
+            try:
+                google_service = GoogleService(session)
+                subject = vars_dict.get("subject") or "Interview Invitation"
+                email_req = GoogleSendEmailRequest(
+                    candidate_id=candidate.id,
+                    subject=subject,
+                    body=msg.body,
+                    template_name="outreach_interview_invitation",
+                )
+                google_service.send_email(user_id=user_id, request=email_req)
+                send_success = True
+            except Exception as exc:
+                send_error = str(exc)
+                logger.warning("Email outreach failed for message %s: %s", msg.id, exc)
 
         if send_success:
             msg.status = MessageStatus.sent

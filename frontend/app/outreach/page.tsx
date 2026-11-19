@@ -44,7 +44,7 @@ export default function OutreachPage() {
 
   // Drafting form state
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>("");
-  const [draftChannel, setDraftChannel] = useState<"whatsapp" | "email">("whatsapp");
+  const [draftChannel, setDraftChannel] = useState<"email">("email");
   const [draftLanguage, setDraftLanguage] = useState<"english" | "hinglish">("english");
   const [customInstructions, setCustomInstructions] = useState<string>("");
 
@@ -319,7 +319,7 @@ export default function OutreachPage() {
                 AI Shortlist Outreach & Approval Queue
               </h1>
               <p className="text-sm text-slate-400 mt-1 max-w-3xl">
-                Personalized candidate outreach generated from JD & CV data (WhatsApp or Email,
+                Personalized candidate outreach generated from JD & CV data (Gmail API,
                 Hinglish or English). All drafts require recruiter approval before dispatch.
                 Stages update automatically: <strong>Shortlisted</strong> &rarr;{" "}
                 <strong>Contacted</strong> (on reply) &rarr; <strong>Scheduled</strong> (on booking) &rarr;{" "}
@@ -375,16 +375,15 @@ export default function OutreachPage() {
             {/* Channel */}
             <div>
               <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <Mail className="w-3.5 h-3.5 text-blue-400" />
                 Channel
               </label>
               <select
                 id="select-outreach-channel"
-                value={draftChannel}
-                onChange={(e) => setDraftChannel(e.target.value as "whatsapp" | "email")}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                value="email"
+                disabled
+                className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 cursor-not-allowed"
               >
-                <option value="whatsapp">WhatsApp Cloud API</option>
                 <option value="email">Email (Gmail API)</option>
               </select>
             </div>
@@ -467,9 +466,7 @@ export default function OutreachPage() {
                 onChange={(e) => setChannelFilter(e.target.value)}
                 className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-purple-500"
               >
-                <option value="all">All Channels</option>
-                <option value="whatsapp">WhatsApp Only</option>
-                <option value="email">Email Only</option>
+                <option value="all">Email (Gmail)</option>
               </select>
 
               {queueItems.length > 0 && (
@@ -579,19 +576,9 @@ export default function OutreachPage() {
 
                           {/* Channel & Language badges */}
                           <div className="flex items-center gap-2">
-                            <span
-                              className={`text-[11px] font-semibold px-2.5 py-1 rounded-xl flex items-center gap-1.5 ${
-                                item.channel === "whatsapp"
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                  : "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                              }`}
-                            >
-                              {item.channel === "whatsapp" ? (
-                                <MessageSquare className="w-3 h-3" />
-                              ) : (
-                                <Mail className="w-3 h-3" />
-                              )}
-                              {item.channel.toUpperCase()}
+                            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-xl flex items-center gap-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              <Mail className="w-3 h-3" />
+                              EMAIL
                             </span>
                             <span className="text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">
                               <Globe className="w-3 h-3" />

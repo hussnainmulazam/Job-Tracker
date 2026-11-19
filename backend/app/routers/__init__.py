@@ -10,7 +10,6 @@ from app.routers.outreach import router as outreach_router
 from app.routers.scheduling import router as scheduling_router
 from app.routers.scorecards import router as scorecards_router
 from app.routers.search import router as search_router
-from app.routers.whatsapp import router as whatsapp_router
 
 __all__ = [
     "api_router",
@@ -25,5 +24,4 @@ __all__ = [
     "dashboard_router",
     "ai_router",
     "health_router",
-    "whatsapp_router",
 ]

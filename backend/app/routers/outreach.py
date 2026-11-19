@@ -36,7 +36,7 @@ router = APIRouter(prefix="/outreach", tags=["Outreach Agent"])
     "/draft",
     response_model=OutreachDraftResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Draft personalized outreach message for shortlisted candidate (WhatsApp or Email, Hinglish or English)",
+    summary="Draft personalized outreach message for shortlisted candidate (Email, Hinglish or English)",
     dependencies=[Depends(rate_limit(times=30, seconds=60, scope="outreach:draft"))],
 )
 async def draft_outreach(
@@ -70,7 +70,7 @@ def get_approval_queue(
     session: SessionDep,
     current_user: CurrentUser,
     candidate_id: Optional[uuid.UUID] = Query(None, description="Filter by candidate"),
-    channel: Optional[str] = Query(None, description="Filter by channel: whatsapp or email"),
+    channel: Optional[str] = Query(None, description="Filter by channel: email"),
 ) -> List[ApprovalQueueItem]:
     """
     Shows all outreach messages awaiting HR review (hr_approved == False).
@@ -118,7 +118,7 @@ async def approve_and_send(
     """
     HR approves single message:
     - Sets hr_approved = True
-    - Transmits via WhatsApp or Email
+    - Transmits via Email (Gmail API)
     - Records success or exact error failure in audit trail.
     """
     return await outreach_service.approve_and_send(

@@ -873,238 +873,61 @@ export const googleApi = {
     api.post<GooglePreviewEmailResponse>("/api/v1/integrations/google/preview-email", data),
   sendEmail: (data: GoogleSendEmailRequest) =>
     api.post<GoogleSendEmailResponse>("/api/v1/integrations/google/send-email", data),
+  listConversations: (filterStatus?: string) => {
+    const params = filterStatus && filterStatus !== "all" ? `?filter_status=${filterStatus}` : "";
+    return api.get<EmailConversationsResponse>(`/api/v1/integrations/google/conversations${params}`);
+  },
+  getThread: (candidateId: string) =>
+    api.get<EmailThreadResponse>(`/api/v1/integrations/google/threads/${candidateId}`),
+  sendReply: (data: { candidate_id: string; message: string; subject?: string }) =>
+    api.post<GoogleSendEmailResponse>("/api/v1/integrations/google/reply", data),
+  aiDraftReply: (data: { candidate_id: string; instructions?: string | null }) =>
+    api.post<{ candidate_id: string; drafted_subject: string; drafted_message: string }>(
+      "/api/v1/integrations/google/ai-draft-reply",
+      data
+    ),
 };
 
-// ── WhatsApp Cloud API ───────────────────────────────────────────────────────
+// ── Email Conversations & Messaging ────────────────────────────────────────
 
-export interface WhatsAppTemplateVariable {
-  key: string;
-  label: string;
-  default_source?: string | null;
-}
-
-export interface WhatsAppTemplateDefinition {
-  name: string;
-  display_name: string;
-  category: string;
-  language: string;
-  body_template: string;
-  variables: WhatsAppTemplateVariable[];
-}
-
-export interface WhatsAppSendTemplateRequest {
-  candidate_id: string;
-  template_name: string;
-  language_code?: string;
-  variables?: Record<string, string>;
-}
-
-export interface WhatsAppSendFreeformRequest {
-  candidate_id: string;
-  message: string;
-}
-
-export interface WhatsAppBatchCandidatePreview {
-  candidate_id: string;
-  candidate_name: string;
-  phone?: string | null;
-  whatsapp_opt_in: boolean;
-  can_send: boolean;
-  rendered_preview: string;
-  variables: Record<string, string>;
-}
-
-export interface WhatsAppBatchPreviewRequest {
-  candidate_ids: string[];
-  template_name: string;
-  language_code?: string;
-  custom_variables?: Record<string, string>;
-}
-
-export interface WhatsAppBatchPreviewResponse {
-  template_name: string;
-  body_template: string;
-  previews: WhatsAppBatchCandidatePreview[];
-  total_selected: number;
-  eligible_count: number;
-  ineligible_opt_out_count: number;
-}
-
-export interface WhatsAppBatchSendRequest {
-  candidate_ids: string[];
-  template_name: string;
-  language_code?: string;
-  custom_variables?: Record<string, string>;
-}
-
-export interface WhatsAppBatchSendResult {
-  candidate_id: string;
-  candidate_name: string;
-  phone?: string | null;
-  status: "sent" | "blocked_opt_out" | "failed";
-  message_id?: string | null;
-  error?: string | null;
-}
-
-export interface WhatsAppBatchSendResponse {
-  total_selected: number;
-  sent_count: number;
-  blocked_count: number;
-  failed_count: number;
-  results: WhatsAppBatchSendResult[];
-}
-
-export interface WhatsAppAIDraftRequest {
-  candidate_id: string;
-  instructions?: string | null;
-}
-
-export interface WhatsAppAIDraftResponse {
-  candidate_id: string;
-  drafted_message: string;
-  care_window_open: boolean;
-  requires_hr_approval: boolean;
-  context_summary: string;
-}
-
-export interface WhatsAppMessageRead {
-  id: string;
-  candidate_id: string;
-  candidate_name?: string | null;
-  candidate_phone?: string | null;
-  direction: "inbound" | "outbound";
-  message_type: "template" | "text";
-  body: string;
-  template_name?: string | null;
-  template_language?: string | null;
-  template_variables?: Record<string, any> | null;
-  whatsapp_message_id?: string | null;
-  status: "pending" | "sent" | "delivered" | "read" | "failed";
-  error_message?: string | null;
-  retry_count: number;
-  ai_drafted: boolean;
-  hr_approved: boolean;
-  sent_at?: string | null;
-  delivered_at?: string | null;
-  read_at?: string | null;
-  failed_at?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface WhatsAppThreadResponse {
-  candidate_id: string;
-  candidate_name: string;
-  candidate_phone?: string | null;
-  whatsapp_opt_in: boolean;
-  whatsapp_opt_in_at?: string | null;
-  last_inbound_whatsapp_at?: string | null;
-  care_window_open: boolean;
-  care_window_expires_at?: string | null;
-  seconds_remaining?: number | null;
-  messages: WhatsAppMessageRead[];
-}
-
-export interface WhatsAppStatusResponse {
-  configured: boolean;
-  valid: boolean;
-  is_expired: boolean;
-  phone_number_id?: string | null;
-  display_phone_number?: string | null;
-  verified_name?: string | null;
-  quality_rating?: string | null;
-  error_code?: number | null;
-  error_message?: string | null;
-  status_message: string;
-  default_template: string;
-}
-
-export interface ContactCandidateRequest {
-  channel: "whatsapp" | "email";
-  message: string;
-  subject?: string;
-  template_name?: string;
-  whatsapp_opt_in?: boolean;
-  variables?: Record<string, string>;
-}
-
-export interface ContactCandidateResponse {
-  candidate_id: string;
-  candidate_name: string;
-  channel: string;
-  status: string;
-  message_id?: string | null;
-  whatsapp_message_id?: string | null;
-  used_template?: string | null;
-  care_window_open: boolean;
-  error_message?: string | null;
-  sent_at?: string | null;
-}
-
-export interface ContactPreviewResponse {
+export interface EmailConversationSummary {
   candidate_id: string;
   candidate_name: string;
   candidate_email: string;
-  candidate_phone?: string | null;
-  clean_phone?: string | null;
-  phone_valid: boolean;
-  phone_error?: string | null;
-  whatsapp_opt_in: boolean;
-  care_window_open: boolean;
-  care_window_expires_at?: string | null;
-  seconds_remaining?: number | null;
-  default_template: string;
-  variables: Record<string, string>;
-  suggested_whatsapp_message: string;
-  suggested_email_subject: string;
-  suggested_email_body: string;
+  candidate_stage: string;
+  opening_title?: string | null;
+  last_message_body?: string | null;
+  last_message_subject?: string | null;
+  last_message_direction?: string | null;
+  last_message_at?: string | null;
+  unread: boolean;
 }
 
-export const whatsappApi = {
-  getStatus: () =>
-    api.get<WhatsAppStatusResponse>("/api/v1/whatsapp/status"),
+export interface EmailConversationsResponse {
+  conversations: EmailConversationSummary[];
+  total_conversations: number;
+  awaiting_reply_count: number;
+}
 
-  getContactPreview: (candidateId: string) =>
-    api.get<ContactPreviewResponse>(`/api/v1/whatsapp/candidates/${candidateId}/contact-preview`),
+export interface EmailMessageItem {
+  id: string;
+  candidate_id: string;
+  direction: "inbound" | "outbound" | string;
+  subject?: string | null;
+  body: string;
+  status: string;
+  sent_at?: string | null;
+  created_at: string;
+}
 
-  contactCandidate: (candidateId: string, data: ContactCandidateRequest) =>
-    api.post<ContactCandidateResponse>(`/api/v1/whatsapp/contact/${candidateId}`, data),
-
-  listConversations: (filterStatus?: string) => {
-    const params = filterStatus && filterStatus !== "all" ? `?filter_status=${filterStatus}` : "";
-    return api.get<WhatsAppConversationsResponse>(`/api/v1/whatsapp/conversations${params}`);
-  },
-
-  getTemplates: () =>
-    api.get<WhatsAppTemplateDefinition[]>("/api/v1/whatsapp/templates"),
-
-  getThread: (candidateId: string) =>
-    api.get<WhatsAppThreadResponse>(`/api/v1/whatsapp/threads/${candidateId}`),
-
-  sendTemplate: (data: WhatsAppSendTemplateRequest) =>
-    api.post<WhatsAppMessageRead>("/api/v1/whatsapp/send-template", data),
-
-  sendFreeform: (data: WhatsAppSendFreeformRequest) =>
-    api.post<WhatsAppMessageRead>("/api/v1/whatsapp/send-freeform", data),
-
-  batchPreview: (data: WhatsAppBatchPreviewRequest) =>
-    api.post<WhatsAppBatchPreviewResponse>("/api/v1/whatsapp/batch-preview", data),
-
-  batchSend: (data: WhatsAppBatchSendRequest) =>
-    api.post<WhatsAppBatchSendResponse>("/api/v1/whatsapp/batch-send", data),
-
-  aiDraft: (data: WhatsAppAIDraftRequest) =>
-    api.post<WhatsAppAIDraftResponse>("/api/v1/whatsapp/ai-draft-reply", data),
-
-  setOptIn: (candidateId: string, whatsapp_opt_in: boolean) =>
-    api.post<{ candidate_id: string; whatsapp_opt_in: boolean; whatsapp_opt_in_at: string | null }>(
-      `/api/v1/whatsapp/candidates/${candidateId}/opt-in`,
-      { whatsapp_opt_in }
-    ),
-
-  retryMessage: (messageId: string) =>
-    api.post<WhatsAppMessageRead>(`/api/v1/whatsapp/messages/${messageId}/retry`),
-};
+export interface EmailThreadResponse {
+  candidate_id: string;
+  candidate_name: string;
+  candidate_email: string;
+  candidate_stage: string;
+  opening_title?: string | null;
+  messages: EmailMessageItem[];
+}
 
 // ── Scheduling & Interviews API ──────────────────────────────────────────────
 

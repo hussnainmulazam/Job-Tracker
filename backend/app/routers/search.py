@@ -28,10 +28,10 @@ SYSTEM_ACTIONS = [
     },
     {
         "id": "action-inbox",
-        "title": "Unified Inbox",
-        "subtitle": "WhatsApp candidate chat threads and 24h care window messaging",
+        "title": "Recruiting Inbox",
+        "subtitle": "Candidate email threads and Gmail sync messaging",
         "link": "/inbox",
-        "keywords": ["inbox", "whatsapp", "messages", "chat", "threads", "reply"],
+        "keywords": ["inbox", "email", "messages", "threads", "gmail", "reply"],
     },
     {
         "id": "action-interviews",
@@ -57,9 +57,9 @@ SYSTEM_ACTIONS = [
     {
         "id": "action-settings",
         "title": "Integrations & Settings",
-        "subtitle": "Configure Google Calendar, Gmail sync, WhatsApp API, and availability",
+        "subtitle": "Configure Google Calendar, Gmail sync, AI models, and availability",
         "link": "/settings",
-        "keywords": ["settings", "google", "gmail", "whatsapp", "calendar", "integrations"],
+        "keywords": ["settings", "google", "gmail", "calendar", "integrations", "ai"],
     },
 ]
 

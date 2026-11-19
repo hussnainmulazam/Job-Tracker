@@ -124,7 +124,7 @@ export function AwaitingReplyWidget({
             <span>Messages Awaiting Reply</span>
           </CardTitle>
           <CardDescription className="text-xs text-muted-foreground">
-            Inbound WhatsApp candidate inquiries requiring response
+            Inbound candidate inquiries requiring response
           </CardDescription>
         </div>
         <Link href="/inbox">

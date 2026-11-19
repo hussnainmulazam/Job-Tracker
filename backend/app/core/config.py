@@ -78,14 +78,6 @@ class Settings(BaseSettings):
     GOOGLE_ENCRYPTION_KEY: Optional[str] = None
     FRONTEND_URL: str = "http://localhost:3000"
 
-    # ── WhatsApp Cloud API ───────────────────────────────────────────────────
-    WHATSAPP_TOKEN: Optional[str] = None
-    PHONE_NUMBER_ID: Optional[str] = None
-    VERIFY_TOKEN: Optional[str] = None
-    APP_SECRET: Optional[str] = None
-    WHATSAPP_API_VERSION: str = "v25.0"
-    WHATSAPP_DEFAULT_TEMPLATE: str = "hello_world"
-
     # Supabase Storage Integration
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None

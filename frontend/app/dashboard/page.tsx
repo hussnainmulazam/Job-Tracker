@@ -118,7 +118,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 3. Live Recruiting Pulse: Upcoming Interviews & WhatsApp Inbound Queue */}
+        {/* 3. Live Recruiting Pulse: Upcoming Interviews & Inbound Email Queue */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <UpcomingInterviewsWidget stats={stats} isLoading={isLoading} />
           <AwaitingReplyWidget stats={stats} isLoading={isLoading} />

@@ -67,8 +67,11 @@ async def _periodic_gmail_sync_worker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import sys
+    is_testing = os.getenv("TESTING") == "true" or "pytest" in sys.modules
+
     logger.info("Starting up %s (v%s)...", settings.PROJECT_NAME, settings.VERSION)
-    if os.getenv("TESTING") != "true":
+    if not is_testing:
         try:
             init_db()
             logger.info("Database tables initialized successfully via Supabase.")
@@ -76,29 +79,8 @@ async def lifespan(app: FastAPI):
             logger.warning("Could not connect to database at startup: %s", exc)
 
     sync_task = None
-    if os.getenv("TESTING") != "true":
+    if not is_testing:
         sync_task = asyncio.create_task(_periodic_gmail_sync_worker())
-
-        # Validate WhatsApp Cloud API token on startup
-        try:
-            from app.services.whatsapp_service import whatsapp_service
-            wa_status = whatsapp_service.validate_token()
-            if wa_status.get("is_expired"):
-                logger.warning(
-                    "⚠️  WhatsApp Token Expired on startup: %s",
-                    wa_status.get("status_message"),
-                )
-            elif wa_status.get("valid"):
-                logger.info(
-                    "WhatsApp Cloud API connected: %s (%s, Rating: %s)",
-                    wa_status.get("verified_name"),
-                    wa_status.get("display_phone_number"),
-                    wa_status.get("quality_rating"),
-                )
-            else:
-                logger.info("WhatsApp Cloud API status: %s", wa_status.get("status_message"))
-        except Exception as wa_exc:
-            logger.warning("Could not validate WhatsApp token on startup: %s", wa_exc)
 
     yield
 
@@ -149,8 +131,6 @@ app.include_router(integrations_google.router)
 from app.routers import job_openings
 app.include_router(job_openings.router)
 app.include_router(job_openings.openings_alias_router)
-from app.routers import whatsapp as whatsapp_router_module
-app.include_router(whatsapp_router_module.router)
 
 # Temporary debug diagnostic router
 app.include_router(debug.router)

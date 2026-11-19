@@ -120,7 +120,7 @@ export function CommandPalette({
       href: "/pipeline",
     },
     {
-      label: "Unified Inbox (WhatsApp)",
+      label: "Recruiting Inbox (Email)",
       icon: MessageSquare,
       href: "/inbox",
     },

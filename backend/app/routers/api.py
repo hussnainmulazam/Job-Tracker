@@ -16,7 +16,6 @@ from app.routers import (
     scheduling,
     scorecards,
     search,
-    whatsapp,
 )
 
 api_router = APIRouter()
@@ -24,7 +23,6 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(auth_google.router)
 api_router.include_router(integrations_google.router)
-api_router.include_router(whatsapp.router)
 api_router.include_router(outreach.router)
 api_router.include_router(scheduling.router)
 api_router.include_router(job_openings.router)

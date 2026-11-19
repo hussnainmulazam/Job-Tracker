@@ -58,7 +58,7 @@ export function StatsHeader({ stats, isLoading }: StatsHeaderProps) {
     {
       title: "Awaiting Reply",
       value: stats.messages_awaiting_reply ?? 0,
-      subtitle: "Inbound WhatsApp messages",
+      subtitle: "Inbound candidate email messages",
       icon: MessageSquare,
       color: "text-emerald-600 dark:text-emerald-400",
       bgColor: "bg-emerald-500/10",

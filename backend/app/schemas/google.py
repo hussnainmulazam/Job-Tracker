@@ -108,3 +108,59 @@ class GoogleSendEmailResponse(BaseModel):
     status: str
     sent_at: datetime
     google_message_id: Optional[str] = None
+
+
+class EmailConversationSummary(BaseModel):
+    candidate_id: uuid.UUID
+    candidate_name: str
+    candidate_email: str
+    candidate_stage: str
+    opening_title: Optional[str] = None
+    last_message_body: Optional[str] = None
+    last_message_subject: Optional[str] = None
+    last_message_direction: Optional[str] = None
+    last_message_at: Optional[datetime] = None
+    unread: bool = False
+
+
+class EmailConversationsResponse(BaseModel):
+    conversations: List[EmailConversationSummary] = Field(default_factory=list)
+    total_conversations: int = 0
+    awaiting_reply_count: int = 0
+
+
+class EmailMessageItem(BaseModel):
+    id: uuid.UUID
+    candidate_id: uuid.UUID
+    direction: str
+    subject: Optional[str] = None
+    body: str
+    status: str
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class EmailThreadResponse(BaseModel):
+    candidate_id: uuid.UUID
+    candidate_name: str
+    candidate_email: str
+    candidate_stage: str
+    opening_title: Optional[str] = None
+    messages: List[EmailMessageItem] = Field(default_factory=list)
+
+
+class EmailReplyRequest(BaseModel):
+    candidate_id: uuid.UUID
+    message: str = Field(..., min_length=1)
+    subject: Optional[str] = None
+
+
+class EmailAIDraftRequest(BaseModel):
+    candidate_id: uuid.UUID
+    instructions: Optional[str] = None
+
+
+class EmailAIDraftResponse(BaseModel):
+    candidate_id: uuid.UUID
+    drafted_subject: str
+    drafted_message: str

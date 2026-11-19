@@ -33,7 +33,7 @@ from app.schemas.candidate import (
 )
 from app.schemas.scorecard import ScorecardRead
 from app.schemas.extractor import CandidateLinkRead
-from app.schemas.whatsapp import WhatsAppMessageRead
+from app.schemas.message import MessageRead
 from app.schemas.scheduling import InterviewRead, SchedulingLinkRead
 from app.schemas.audit_log import AuditLogRead
 from app.services.ai import (
@@ -111,6 +111,9 @@ class CandidateService:
             type="new_applicant",
             link=f"/pipeline?candidate_id={candidate.id}",
         )
+
+        # Automated AI scoring on intake & auto acknowledgement email
+        self.auto_handle_candidate_received(session, user_id, candidate)
 
         read = CandidateRead.model_validate(candidate)
         read.opening_title = opening.title
@@ -219,6 +222,9 @@ class CandidateService:
             type="new_applicant",
             link=f"/pipeline?candidate_id={candidate.id}",
         )
+
+        # Automated AI scoring on intake & auto acknowledgement email
+        self.auto_handle_candidate_received(session, user_id, candidate)
 
         read = CandidateRead.model_validate(candidate)
         read.opening_title = opening.title
@@ -415,7 +421,7 @@ class CandidateService:
         cv_file_url: Optional[str] = None,
     ) -> CandidateRead:
         candidate = self.get_by_id(session, user_id, candidate_id)
-        extracted_text = extract_text_from_pdf(pdf_bytes)
+        extracted_text = parse_cv_document(pdf_bytes, cv_file_url or "cv.pdf")
 
         candidate.cv_text = extracted_text
         if cv_file_url:
@@ -604,6 +610,10 @@ class CandidateService:
             details=f"Moved {candidate.name} from {old_stage} to {new_stage}.",
         )
 
+        # Trigger auto-approval email if moved to interview, shortlisted, or offer
+        if stage in (CandidateStage.interview, CandidateStage.shortlisted, CandidateStage.offer) and old_stage != new_stage:
+            self.auto_send_approval_email(session, user_id, candidate)
+
         return self.get_read_by_id(session, user_id, candidate.id)
 
     def bulk_update_stage(
@@ -637,8 +647,148 @@ class CandidateService:
                     to_stage=new_stage_str,
                     details=f"Bulk moved {cand.name} to {new_stage_str}.",
                 )
+                if stage in (CandidateStage.interview, CandidateStage.shortlisted, CandidateStage.offer) and old_stage_str != new_stage_str:
+                    self.auto_send_approval_email(session, user_id, cand)
                 count += 1
         return count
+
+    def auto_handle_candidate_received(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate: Candidate,
+    ) -> None:
+        """
+        Automated workflow when a candidate CV is received/ingested:
+        1. Auto-checks AI scoring (fit score, matched/missing skills, red flags, summary).
+        2. Dispatches automated application received acknowledgement email from recruiter's Gmail.
+        """
+        import os
+        import sys
+        if os.getenv("TESTING") == "true" or "pytest" in sys.modules:
+            return
+        # 1. AI Scoring
+        try:
+            import asyncio
+            import concurrent.futures
+
+            async def _do_score():
+                return await self.score_candidate(session, user_id, candidate.id, re_run=False)
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(asyncio.run, _do_score()).result()
+            else:
+                asyncio.run(_do_score())
+
+            session.refresh(candidate)
+            logger.info("Candidate %s auto-scored successfully: score=%s", candidate.id, candidate.score)
+        except Exception as exc:
+            logger.warning("Auto-screening scoring failed on intake for candidate %s: %s", candidate.id, exc)
+
+        # 2. Auto-dispatch Application Received Email
+        if candidate.email and not candidate.email.endswith("@no-email.com"):
+            try:
+                from app.services.google_service import GoogleService
+                from app.schemas.google import GoogleSendEmailRequest
+
+                opening = session.exec(
+                    select(JobOpening).where(JobOpening.id == candidate.opening_id)
+                ).first()
+                job_title = opening.title if opening else "Position"
+
+                subject = f"Application Received: {job_title}"
+                body = (
+                    f"Dear {candidate.name},\n\n"
+                    f"Thank you for submitting your application for the {job_title} position.\n\n"
+                    f"We have received your resume and application materials. "
+                    f"Our recruiting team is reviewing your profile and will be in touch regarding next steps.\n\n"
+                    f"Thank you for your interest in joining our team.\n\n"
+                    f"Best regards,\n"
+                    f"Recruiting & Talent Acquisition Team"
+                )
+
+                google_svc = GoogleService(session)
+                google_svc.send_email(
+                    user_id=user_id,
+                    request=GoogleSendEmailRequest(
+                        candidate_id=candidate.id,
+                        subject=subject,
+                        body=body,
+                        template_name="application_received_auto_ack",
+                    ),
+                )
+                logger.info("Auto-sent application received acknowledgement to %s", candidate.email)
+            except Exception as exc:
+                logger.warning("Failed to auto-send application receipt email to %s: %s", candidate.email, exc)
+
+    def auto_send_approval_email(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate: Candidate,
+    ) -> None:
+        """
+        Automated workflow when a candidate application is approved:
+        1. Generates candidate-specific self-scheduling booking link.
+        2. Dispatches an interview invitation email from the recruiter's connected Gmail.
+        """
+        import os
+        import sys
+        if os.getenv("TESTING") == "true" or "pytest" in sys.modules:
+            return
+
+        if not candidate.email or candidate.email.endswith("@no-email.com"):
+            return
+
+        try:
+            from app.services.scheduling_service import scheduling_service
+            from app.services.google_service import GoogleService
+            from app.schemas.google import GoogleSendEmailRequest
+
+            opening = session.exec(
+                select(JobOpening).where(JobOpening.id == candidate.opening_id)
+            ).first()
+            job_title = opening.title if opening else "Position"
+
+            sched_link = scheduling_service.create_scheduling_link(
+                session=session,
+                user_id=user_id,
+                candidate_id=candidate.id,
+                validity_days=7,
+            )
+            booking_url = sched_link.booking_url
+
+            subject = f"Application Approved: Interview Invitation for {job_title}"
+            body = (
+                f"Dear {candidate.name},\n\n"
+                f"Congratulations! We are delighted to inform you that your application for the {job_title} position has been reviewed and approved by our team.\n\n"
+                f"We would love to invite you for an interview. Please select a convenient time slot that works best for your schedule using your personal scheduling link:\n\n"
+                f"{booking_url}\n\n"
+                f"If you have any questions before the interview, simply reply to this email.\n\n"
+                f"Looking forward to speaking with you!\n\n"
+                f"Best regards,\n"
+                f"Recruiting & Talent Acquisition Team"
+            )
+
+            google_svc = GoogleService(session)
+            google_svc.send_email(
+                user_id=user_id,
+                request=GoogleSendEmailRequest(
+                    candidate_id=candidate.id,
+                    subject=subject,
+                    body=body,
+                    template_name="application_approved_interview_invitation",
+                ),
+            )
+            logger.info("Auto-sent approval and interview invitation email to %s (%s)", candidate.name, candidate.email)
+        except Exception as exc:
+            logger.warning("Failed to auto-send approval interview invitation email to %s: %s", candidate.email, exc)
 
     def bulk_delete(
         self,
@@ -703,7 +853,7 @@ class CandidateService:
         for l in links:
             session.delete(l)
 
-        # 3. Cascade delete WhatsApp Messages
+        # 3. Cascade delete Messages
         messages = session.exec(
             select(Message).where(
                 Message.candidate_id == candidate_id,
@@ -797,14 +947,14 @@ class CandidateService:
         ).all()
         scorecards = [ScorecardRead.model_validate(sc) for sc in raw_scorecards]
 
-        # 3. WhatsApp Messages
+        # 3. Communications / Messages
         raw_messages = session.exec(
             select(Message).where(
                 Message.candidate_id == candidate_id,
                 Message.user_id == user_id,
             )
         ).all()
-        messages = [WhatsAppMessageRead.model_validate(m) for m in raw_messages]
+        messages = [MessageRead.model_validate(m) for m in raw_messages]
 
         # 4. Interviews
         from app.services.scheduling_service import scheduling_service

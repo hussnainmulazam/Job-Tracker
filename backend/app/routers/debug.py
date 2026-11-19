@@ -376,83 +376,9 @@ async def debug_integrations(
 
         diagnostics["4_sheets_drive"] = sheets_diag
 
-        # ── 5. WhatsApp Cloud API Check ───────────────────────────────────────
-        whatsapp_diag: Dict[str, Any] = {
-            "feature": "WhatsApp Cloud API",
-            "phone_number_id": settings.PHONE_NUMBER_ID,
-            "target_verified_phone": actual_verified_phone,
-            "token_configured": bool(settings.WHATSAPP_TOKEN and not settings.WHATSAPP_TOKEN.startswith("your_")),
-            "token_valid_ok": False,
-            "phone_number_metadata": None,
-            "hello_world_sent_ok": False,
-            "status": "FAIL",
-            "raw_token_validation_response": None,
-            "raw_template_send_response": None,
-            "error": None,
-        }
+        # WhatsApp removed: dedicated Email & Google Workspace only
 
-        wa_token = (settings.WHATSAPP_TOKEN or "").strip()
-        phone_id = (settings.PHONE_NUMBER_ID or "").strip()
-
-        if not wa_token or not phone_id:
-            whatsapp_diag["error"] = "WHATSAPP_TOKEN or PHONE_NUMBER_ID not configured in backend/.env."
-        else:
-            wa_headers = {
-                "Authorization": f"Bearer {wa_token}",
-                "Content-Type": "application/json",
-            }
-            api_version = settings.WHATSAPP_API_VERSION or "v25.0"
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                # 5a. Validate token against PHONE_NUMBER_ID
-                try:
-                    val_resp = await client.get(
-                        f"https://graph.facebook.com/{api_version}/{phone_id}",
-                        headers=wa_headers,
-                    )
-                    whatsapp_diag["raw_token_validation_response"] = {
-                        "status_code": val_resp.status_code,
-                        "body": val_resp.text[:500],
-                    }
-                    if val_resp.is_success:
-                        whatsapp_diag["token_valid_ok"] = True
-                        whatsapp_diag["phone_number_metadata"] = val_resp.json()
-                    else:
-                        whatsapp_diag["error"] = f"WhatsApp token validation failed ({val_resp.status_code}): {val_resp.text[:300]}"
-                except Exception as exc:
-                    whatsapp_diag["error"] = f"Exception validating WhatsApp token: {exc}"
-
-                # 5b. Send hello_world template to verified number
-                try:
-                    tpl_payload = {
-                        "messaging_product": "whatsapp",
-                        "to": actual_verified_phone,
-                        "type": "template",
-                        "template": {
-                            "name": "hello_world",
-                            "language": {"code": "en_US"},
-                        },
-                    }
-                    tpl_resp = await client.post(
-                        f"https://graph.facebook.com/{api_version}/{phone_id}/messages",
-                        json=tpl_payload,
-                        headers=wa_headers,
-                    )
-                    whatsapp_diag["raw_template_send_response"] = {
-                        "status_code": tpl_resp.status_code,
-                        "body": tpl_resp.text[:500],
-                    }
-                    if tpl_resp.is_success:
-                        whatsapp_diag["hello_world_sent_ok"] = True
-                        whatsapp_diag["status"] = "PASS"
-                    else:
-                        tpl_err = f"WhatsApp template send failed ({tpl_resp.status_code}): {tpl_resp.text[:300]}"
-                        whatsapp_diag["error"] = f"{whatsapp_diag['error'] or ''} | {tpl_err}".strip(" |")
-                except Exception as exc:
-                    whatsapp_diag["error"] = f"{whatsapp_diag['error'] or ''} | WhatsApp send exception: {exc}".strip(" |")
-
-        diagnostics["5_whatsapp"] = whatsapp_diag
-
-        # ── 6. AI Models Health Check ─────────────────────────────────────────
+        # ── 5. AI Models Health Check ─────────────────────────────────────────
         ai_diag: Dict[str, Any] = {
             "feature": "AI Models Health Probe",
             "overall_status": "unknown",
@@ -506,9 +432,8 @@ async def debug_integrations(
                 "POST /scheduling/links": True,
                 "POST /scheduling/book": True,
                 "GET /scheduling/interviews": True,
-                "POST /whatsapp/webhook": True,
-                "POST /whatsapp/send-template": True,
-                "GET /whatsapp/candidates/{candidate_id}/messages": True,
+                "POST /integrations/google/send-email": True,
+                "GET /integrations/google/messages": True,
             },
             "saving_availability_writes_row": False,
             "verified_saved_row": None,

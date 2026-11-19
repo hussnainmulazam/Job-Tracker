@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   schedulingApi,
-  whatsappApi,
+  googleApi,
   Candidate,
   SchedulingLinkRead,
 } from "@/lib/api";
@@ -37,7 +37,7 @@ export function ScheduleInviteModal({
   const [validityDays, setValidityDays] = useState(7);
   const [createdLink, setCreatedLink] = useState<SchedulingLinkRead | null>(null);
   const [copied, setCopied] = useState(false);
-  const [whatsappSent, setWhatsappSent] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
   // Generate Link Mutation
   const createLinkMutation = useMutation({
@@ -52,24 +52,20 @@ export function ScheduleInviteModal({
     },
   });
 
-  // WhatsApp Send Invitation Mutation
-  const sendWhatsAppMutation = useMutation({
+  // Email Send Invitation Mutation via Gmail
+  const sendEmailMutation = useMutation({
     mutationFn: async () => {
       if (!createdLink) return;
       const fullUrl = `${window.location.origin}${createdLink.public_url}`;
-      return whatsappApi.sendTemplate({
+      return googleApi.sendEmail({
         candidate_id: candidate.id,
-        template_name: "recruitment_interview_invitation",
-        variables: {
-          candidate_name: candidate.name,
-          job_title: candidate.opening_title || "Open Position",
-          interview_date: "Pick your slot below",
-          meet_link: fullUrl,
-        },
+        subject: `Interview Invitation for ${candidate.opening_title || "Open Position"}`,
+        body: `Hi ${candidate.name},\n\nPlease use the following link to select a convenient time for your interview:\n${fullUrl}\n\nBest regards,\nRecruiting Team`,
+        template_name: "interview_invitation",
       });
     },
     onSuccess: () => {
-      setWhatsappSent(true);
+      setEmailSent(true);
     },
   });
 
@@ -209,26 +205,20 @@ export function ScheduleInviteModal({
                   Preview Booking Page
                 </a>
 
-                {candidate.whatsapp_opt_in ? (
-                  <Button
-                    onClick={() => sendWhatsAppMutation.mutate()}
-                    disabled={sendWhatsAppMutation.isPending || whatsappSent}
-                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
-                  >
-                    {sendWhatsAppMutation.isPending ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : whatsappSent ? (
-                      <Check className="w-3.5 h-3.5" />
-                    ) : (
-                      <MessageSquare className="w-3.5 h-3.5" />
-                    )}
-                    {whatsappSent ? "Sent to WhatsApp!" : "Dispatch WhatsApp Invitation"}
-                  </Button>
-                ) : (
-                  <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-800 text-[11px] text-slate-400 text-center">
-                    Candidate has not opted in to WhatsApp. Share link via email or copy directly.
-                  </div>
-                )}
+                <Button
+                  onClick={() => sendEmailMutation.mutate()}
+                  disabled={sendEmailMutation.isPending || emailSent || !candidate.email}
+                  className="w-full py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                >
+                  {sendEmailMutation.isPending ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : emailSent ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  {emailSent ? "Email Sent to Candidate!" : "Send Invitation via Gmail"}
+                </Button>
               </div>
             </div>
           )}
