@@ -17,9 +17,16 @@ class DashboardStatsResponse(BaseModel):
     pending_reviews: int = Field(default=0, description="Candidates awaiting screening, score, or recruiter evaluation")
     messages_awaiting_reply: int = Field(default=0, description="Candidate conversations where latest message is inbound")
     interviews_this_week: int = Field(default=0, description="Active interviews scheduled in the current week")
+    interviews_today: int = Field(default=0, description="Active interviews scheduled for today")
     time_to_shortlist_hours: Optional[float] = Field(default=None, description="Average hours from candidate creation to shortlist/interview")
+
+    # Trends vs last week
+    candidates_trend_pct: Optional[float] = Field(default=None, description="Percentage change in candidate intake vs previous 7 days")
+    candidates_this_week: int = Field(default=0, description="New candidates added in past 7 days")
+    openings_trend_pct: Optional[float] = Field(default=None, description="Percentage change in openings vs previous 7 days")
+    interviews_trend_pct: Optional[float] = Field(default=None, description="Percentage change in interviews vs previous 7 days")
     
-    # Detailed breakdowns
+    # Detailed breakdowns and timelines
     stage_breakdown: Dict[str, int] = Field(
         ...,
         description="Candidate distribution across stages (applied, screening, interview, offer, rejected)",
@@ -28,9 +35,17 @@ class DashboardStatsResponse(BaseModel):
         default_factory=list,
         description="Stage-by-stage recruitment funnel with candidate counts and drop-off/conversion percentages",
     )
+    applications_timeline: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Daily candidate application intake for the last 14 days",
+    )
     recent_candidates: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Most recently added or evaluated candidates",
+    )
+    recent_activity: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Recent audit log activity events across candidate lifecycles",
     )
     openings_summary: List[Dict[str, Any]] = Field(
         default_factory=list,

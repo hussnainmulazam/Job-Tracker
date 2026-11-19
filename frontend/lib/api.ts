@@ -313,9 +313,20 @@ export interface DashboardStats {
   pending_reviews: number;
   messages_awaiting_reply: number;
   interviews_this_week: number;
+  interviews_today?: number;
   time_to_shortlist_hours: number | null;
+  candidates_trend_pct?: number | null;
+  candidates_this_week?: number;
+  openings_trend_pct?: number | null;
+  interviews_trend_pct?: number | null;
   stage_breakdown: Record<CandidateStage, number>;
   funnel_by_stage: FunnelStageItem[];
+  applications_timeline?: Array<{
+    date: string;
+    label: string;
+    day: string;
+    count: number;
+  }>;
   recent_candidates: Array<{
     id: string;
     name: string;
@@ -323,6 +334,17 @@ export interface DashboardStats {
     opening_title?: string;
     stage: CandidateStage;
     score: number | null;
+    created_at: string;
+  }>;
+  recent_activity?: Array<{
+    id: string;
+    action: string;
+    candidate_id?: string | null;
+    candidate_name?: string | null;
+    opening_title?: string | null;
+    from_stage?: string | null;
+    to_stage?: string | null;
+    details?: string | null;
     created_at: string;
   }>;
   openings_summary: Array<{

@@ -9,212 +9,328 @@ import {
   MessageSquare,
   Calendar,
   Sparkles,
-  Zap,
-  ArrowUpRight,
   TrendingUp,
-  AlertCircle,
+  TrendingDown,
+  ArrowRight,
   CheckCircle2,
+  AlertCircle,
+  Briefcase,
+  Users,
+  Inbox,
+  Video,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DashboardStats } from "@/lib/api";
 
 interface StatsHeaderProps {
   stats?: DashboardStats;
   isLoading?: boolean;
+  userName?: string;
+  onAddCv?: () => void;
+  onNewOpening?: () => void;
+  onSyncGmail?: () => void;
+  isSyncingGmail?: boolean;
 }
 
-export function StatsHeader({ stats, isLoading }: StatsHeaderProps) {
+export function StatsHeader({
+  stats,
+  isLoading,
+  userName,
+  onAddCv,
+  onNewOpening,
+  onSyncGmail,
+  isSyncingGmail,
+}: StatsHeaderProps) {
+  // Determine greeting based on client time of day
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  };
+
+  const displayName = userName ? userName.split("@")[0] : "Recruiter";
+  const todayFormatted = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+
   if (isLoading || !stats) {
     return <StatsHeaderSkeleton />;
   }
 
-  const cards = [
+  const cvsToReview = stats.pending_reviews ?? 0;
+  const repliesWaiting = stats.messages_awaiting_reply ?? 0;
+  const interviewsToday = stats.interviews_today ?? 0;
+
+  // KPI cards with real trends
+  const kpis = [
     {
-      title: "New CVs Today",
-      value: stats.new_cvs_today ?? 0,
-      subtitle: "Imported via Gmail sync or PDF upload",
-      icon: FileText,
-      color: "text-blue-600 dark:text-blue-400",
-      bgColor: "bg-blue-500/10",
+      title: "Total Candidates",
+      value: stats.total_candidates ?? 0,
+      trend: stats.candidates_trend_pct,
+      trendText:
+        stats.candidates_trend_pct !== undefined && stats.candidates_trend_pct !== null
+          ? `${stats.candidates_trend_pct >= 0 ? "+" : ""}${stats.candidates_trend_pct}% vs last week`
+          : null,
+      subtitle: `${stats.candidates_this_week ?? 0} added in last 7 days`,
+      icon: Users,
       href: "/pipeline",
-      badge: stats.new_cvs_today > 0 ? `${stats.new_cvs_today} new` : "Today",
-      badgeColor: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
     },
     {
-      title: "Pending Reviews",
-      value: stats.pending_reviews ?? 0,
-      subtitle: "Applied & screening awaiting scorecard",
-      icon: Clock,
-      color: "text-amber-600 dark:text-amber-400",
-      bgColor: "bg-amber-500/10",
-      href: "/screening",
-      badge: stats.pending_reviews > 0 ? "Action required" : "All caught up",
-      badgeColor:
-        stats.pending_reviews > 0
-          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-          : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+      title: "Active Openings",
+      value: stats.active_openings ?? 0,
+      trend: stats.openings_trend_pct,
+      trendText:
+        stats.openings_trend_pct !== undefined && stats.openings_trend_pct !== null
+          ? `${stats.openings_trend_pct >= 0 ? "+" : ""}${stats.openings_trend_pct}% vs last week`
+          : null,
+      subtitle: `Out of ${stats.total_openings ?? 0} total requisitions`,
+      icon: Briefcase,
+      href: "/openings",
     },
     {
-      title: "Awaiting Reply",
-      value: stats.messages_awaiting_reply ?? 0,
-      subtitle: "Inbound candidate email messages",
-      icon: MessageSquare,
-      color: "text-emerald-600 dark:text-emerald-400",
-      bgColor: "bg-emerald-500/10",
-      href: "/inbox",
-      badge:
-        stats.messages_awaiting_reply > 0
-          ? `${stats.messages_awaiting_reply} unread`
-          : "Zero pending",
-      badgeColor:
-        stats.messages_awaiting_reply > 0
-          ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold"
-          : "bg-muted text-muted-foreground",
-    },
-    {
-      title: "Interviews This Week",
+      title: "Interviews Scheduled",
       value: stats.interviews_this_week ?? 0,
-      subtitle: "Scheduled on Google Calendar",
+      trend: stats.interviews_trend_pct,
+      trendText:
+        stats.interviews_trend_pct !== undefined && stats.interviews_trend_pct !== null
+          ? `${stats.interviews_trend_pct >= 0 ? "+" : ""}${stats.interviews_trend_pct}% vs last week`
+          : null,
+      subtitle: "Active this week on Calendar",
       icon: Calendar,
-      color: "text-purple-600 dark:text-purple-400",
-      bgColor: "bg-purple-500/10",
       href: "/interviews",
-      badge: "Google Meet",
-      badgeColor: "bg-purple-500/15 text-purple-700 dark:text-purple-300",
     },
     {
-      title: "Time-to-Shortlist",
-      value:
-        stats.time_to_shortlist_hours !== null && stats.time_to_shortlist_hours !== undefined
-          ? `${stats.time_to_shortlist_hours}h`
-          : "—",
-      subtitle:
-        stats.time_to_shortlist_hours !== null
-          ? "Average turnaround speed"
-          : "Awaiting candidate shortlist",
-      icon: Zap,
-      color: "text-indigo-600 dark:text-indigo-400",
-      bgColor: "bg-indigo-500/10",
-      badge: "Pipeline velocity",
-      badgeColor: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
-    },
-    {
-      title: "Avg Fit Score",
-      value: stats.average_score !== null ? `${Math.round(stats.average_score)}%` : "—",
-      subtitle:
-        stats.average_score !== null
-          ? `${stats.screened_candidates} AI evaluations`
-          : "No screened candidates yet",
+      title: "Shortlisted Fit",
+      value: stats.shortlisted_candidates ?? 0,
+      trend: stats.average_score,
+      trendText: stats.average_score !== null ? `${stats.average_score}% avg fit` : null,
+      subtitle: `${stats.screened_candidates ?? 0} AI-screened candidates`,
       icon: Sparkles,
-      color: "text-rose-600 dark:text-rose-400",
-      bgColor: "bg-rose-500/10",
-      href: "/compare",
-      badge: stats.average_score !== null ? "Strict JSON" : "OpenRouter",
-      badgeColor: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+      href: "/screening",
     },
   ];
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          const content = (
-            <Card className="h-full border border-border bg-card/90 shadow-2xs hover:shadow-sm hover:border-primary/40 transition-all">
-              <CardHeader className="flex flex-row items-center justify-between p-3.5 pb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground truncate">
-                  {card.title}
-                </span>
-                <div
-                  className={`h-7 w-7 rounded-lg ${card.bgColor} ${card.color} flex items-center justify-center shrink-0`}
-                >
-                  <Icon className="h-4 w-4" />
-                </div>
-              </CardHeader>
-              <CardContent className="p-3.5 pt-1 space-y-1.5">
-                <div className="flex items-baseline justify-between gap-1">
-                  <CardTitle className="text-2xl font-black tracking-tight text-foreground">
-                    {card.value}
-                  </CardTitle>
-                  {card.badge && (
-                    <span
-                      className={`text-[9.5px] px-1.5 py-0.5 rounded-md font-semibold ${card.badgeColor}`}
-                    >
-                      {card.badge}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[10.5px] text-muted-foreground leading-tight truncate">
-                  {card.subtitle}
-                </p>
-              </CardContent>
-            </Card>
-          );
+    <div className="space-y-6">
+      {/* ── 1. Top Greeting & Today's Priorities ──────────────────────────────── */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+              {getGreeting()}, {displayName}
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Here is your recruitment overview and priorities for today, {todayFormatted}.
+            </p>
+          </div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Live DB Counts</span>
+          </div>
+        </div>
 
-          return (
-            <motion.div
-              key={card.title}
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.15 }}
+        {/* Priorities Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Priority 1: CVs to Review */}
+          <Link href="/screening" className="group">
+            <div
+              className={`p-4 rounded-xl border transition-all h-full flex flex-col justify-between ${
+                cvsToReview > 0
+                  ? "bg-amber-500/5 border-amber-500/30 hover:border-amber-500/60 shadow-xs"
+                  : "bg-card border-border/70 dark:border-white/[0.08] hover:border-border"
+              }`}
             >
-              {card.href ? (
-                <Link href={card.href} className="block h-full">
-                  {content}
-                </Link>
-              ) : (
-                content
-              )}
-            </motion.div>
-          );
-        })}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      CVs to Review
+                    </span>
+                  </div>
+                  <Badge
+                    variant={cvsToReview > 0 ? "warning" : "secondary"}
+                    className="text-[10px] py-0 px-1.5"
+                  >
+                    {cvsToReview > 0 ? "Needs Review" : "Clear"}
+                  </Badge>
+                </div>
+                <div className="text-2xl font-bold tracking-tight text-foreground mt-1">
+                  {cvsToReview}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {cvsToReview > 0
+                    ? "Candidates in Applied or Screening stage awaiting evaluation."
+                    : "All candidate CVs have been screened and reviewed."}
+                </p>
+              </div>
+
+              <div className="pt-3 mt-2 border-t border-border/50 flex items-center justify-between text-xs font-medium text-primary">
+                <span>{cvsToReview > 0 ? "Review Candidates" : "Screen Candidates"}</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          </Link>
+
+          {/* Priority 2: Replies Waiting */}
+          <Link href="/inbox" className="group">
+            <div
+              className={`p-4 rounded-xl border transition-all h-full flex flex-col justify-between ${
+                repliesWaiting > 0
+                  ? "bg-rose-500/5 border-rose-500/30 hover:border-rose-500/60 shadow-xs"
+                  : "bg-card border-border/70 dark:border-white/[0.08] hover:border-border"
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                      <MessageSquare className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Replies Waiting
+                    </span>
+                  </div>
+                  <Badge
+                    variant={repliesWaiting > 0 ? "destructive" : "secondary"}
+                    className="text-[10px] py-0 px-1.5"
+                  >
+                    {repliesWaiting > 0 ? `${repliesWaiting} Unread` : "Zero Pending"}
+                  </Badge>
+                </div>
+                <div className="text-2xl font-bold tracking-tight text-foreground mt-1">
+                  {repliesWaiting}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {repliesWaiting > 0
+                    ? "Inbound candidate email responses awaiting your reply."
+                    : "All candidate communication threads are answered."}
+                </p>
+              </div>
+
+              <div className="pt-3 mt-2 border-t border-border/50 flex items-center justify-between text-xs font-medium text-primary">
+                <span>{repliesWaiting > 0 ? "Open Recruiting Inbox" : "Check Messages"}</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          </Link>
+
+          {/* Priority 3: Interviews Today */}
+          <Link href="/interviews" className="group">
+            <div
+              className={`p-4 rounded-xl border transition-all h-full flex flex-col justify-between ${
+                interviewsToday > 0
+                  ? "bg-purple-500/5 border-purple-500/30 hover:border-purple-500/60 shadow-xs"
+                  : "bg-card border-border/70 dark:border-white/[0.08] hover:border-border"
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                      <Calendar className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Interviews Today
+                    </span>
+                  </div>
+                  <Badge
+                    variant={interviewsToday > 0 ? "primary" : "secondary"}
+                    className="text-[10px] py-0 px-1.5"
+                  >
+                    {interviewsToday > 0 ? `${interviewsToday} Scheduled` : "No Sessions"}
+                  </Badge>
+                </div>
+                <div className="text-2xl font-bold tracking-tight text-foreground mt-1">
+                  {interviewsToday}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {interviewsToday > 0
+                    ? "Candidate Google Meet calls scheduled on your calendar today."
+                    : "No interviews scheduled for today. Bookings sync in real-time."}
+                </p>
+              </div>
+
+              <div className="pt-3 mt-2 border-t border-border/50 flex items-center justify-between text-xs font-medium text-primary">
+                <span>{interviewsToday > 0 ? "View Schedule" : "Schedule Interview"}</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          </Link>
+        </div>
       </div>
 
-      {/* Requisition & Talent Pulse Summary Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 rounded-xl border border-border/80 bg-muted/30 text-xs">
-        <div className="flex items-center gap-4 text-muted-foreground">
-          <span>
-            <strong className="text-foreground">{stats.active_openings}</strong> active /{" "}
-            {stats.total_openings} total job opening{stats.total_openings === 1 ? "" : "s"}
-          </span>
-          <span className="text-border">•</span>
-          <span>
-            <strong className="text-foreground">{stats.total_candidates}</strong> total candidate
-            {stats.total_candidates === 1 ? "" : "s"} in pipeline
-          </span>
-          <span className="text-border">•</span>
-          <span>
-            <strong className="text-foreground">{stats.shortlisted_candidates}</strong> shortlisted
-            in interview/offer
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-          <span>Real-time database analytics</span>
-        </div>
+      {/* ── 2. KPI Cards with Trend vs Last Week ─────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpis.map((kpi, idx) => {
+          const Icon = kpi.icon;
+          const isPositive = kpi.trend !== undefined && kpi.trend !== null && kpi.trend > 0;
+          const isNegative = kpi.trend !== undefined && kpi.trend !== null && kpi.trend < 0;
+
+          return (
+            <Link key={idx} href={kpi.href} className="group">
+              <Card className="border border-border/70 dark:border-white/[0.08] bg-card shadow-xs hover:border-border hover:shadow-card-hover transition-all p-4 rounded-xl flex flex-col justify-between h-full">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-muted-foreground">{kpi.title}</span>
+                    <Icon className="w-4 h-4 text-muted-foreground/80 group-hover:text-primary transition-colors" />
+                  </div>
+                  <div className="text-2xl font-bold tracking-tight text-foreground">
+                    {kpi.value}
+                  </div>
+                </div>
+
+                <div className="pt-3 mt-2 border-t border-border/60 flex items-center justify-between text-[11px]">
+                  {kpi.trendText ? (
+                    <div className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                      {isPositive ? (
+                        <TrendingUp className="w-3.5 h-3.5" />
+                      ) : isNegative ? (
+                        <TrendingDown className="w-3.5 h-3.5 text-rose-500" />
+                      ) : null}
+                      <span>{kpi.trendText}</span>
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">{kpi.subtitle}</span>
+                  )}
+                  <ArrowRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                </div>
+              </Card>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-export function StatsHeaderSkeleton() {
+function StatsHeaderSkeleton() {
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <Card key={i} className="border border-border shadow-2xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3.5 pb-1">
-              <Skeleton className="h-3 w-20" />
-              <Skeleton className="h-7 w-7 rounded-lg" />
-            </CardHeader>
-            <CardContent className="p-3.5 pt-1 space-y-2">
-              <Skeleton className="h-7 w-12" />
-              <Skeleton className="h-2.5 w-full" />
-            </CardContent>
-          </Card>
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-64" />
+        <Skeleton className="h-4 w-96" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-36 rounded-xl" />
         ))}
       </div>
-      <Skeleton className="h-8 w-full rounded-xl" />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
     </div>
   );
 }

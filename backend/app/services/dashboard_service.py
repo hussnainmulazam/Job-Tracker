@@ -9,6 +9,7 @@ from app.models.candidate import Candidate, CandidateStage
 from app.models.interview import Interview, InterviewStatus
 from app.models.job_opening import JobOpening, JobOpeningStatus
 from app.models.message import Message, MessageDirection
+from app.models.audit_log import AuditLog
 from app.schemas.dashboard import DashboardStatsResponse
 
 
@@ -107,7 +108,7 @@ class DashboardService:
             or 0
         )
 
-        # 5. Interviews this week
+        # 5. Interviews this week & today
         interviews_this_week = (
             session.exec(
                 select(func.count(Interview.id)).where(
@@ -119,6 +120,122 @@ class DashboardService:
             ).one()
             or 0
         )
+
+        end_of_today = start_of_today + timedelta(days=1)
+        interviews_today = (
+            session.exec(
+                select(func.count(Interview.id)).where(
+                    Interview.user_id == user_id,
+                    Interview.status != InterviewStatus.cancelled,
+                    Interview.start_time >= start_of_today,
+                    Interview.start_time < end_of_today,
+                )
+            ).one()
+            or 0
+        )
+
+        # 5b. Weekly trend calculations (past 7 days vs previous 7 days)
+        seven_days_ago = now_utc - timedelta(days=7)
+        fourteen_days_ago = now_utc - timedelta(days=14)
+
+        cands_this_week = (
+            session.exec(
+                select(func.count(Candidate.id)).where(
+                    Candidate.user_id == user_id,
+                    Candidate.created_at >= seven_days_ago,
+                )
+            ).one()
+            or 0
+        )
+        cands_last_week = (
+            session.exec(
+                select(func.count(Candidate.id)).where(
+                    Candidate.user_id == user_id,
+                    Candidate.created_at >= fourteen_days_ago,
+                    Candidate.created_at < seven_days_ago,
+                )
+            ).one()
+            or 0
+        )
+        candidates_trend_pct = (
+            round(((cands_this_week - cands_last_week) / cands_last_week) * 100, 1)
+            if cands_last_week > 0
+            else (100.0 if cands_this_week > 0 else 0.0)
+        )
+
+        openings_this_week = (
+            session.exec(
+                select(func.count(JobOpening.id)).where(
+                    JobOpening.user_id == user_id,
+                    JobOpening.created_at >= seven_days_ago,
+                )
+            ).one()
+            or 0
+        )
+        openings_last_week = (
+            session.exec(
+                select(func.count(JobOpening.id)).where(
+                    JobOpening.user_id == user_id,
+                    JobOpening.created_at >= fourteen_days_ago,
+                    JobOpening.created_at < seven_days_ago,
+                )
+            ).one()
+            or 0
+        )
+        openings_trend_pct = (
+            round(((openings_this_week - openings_last_week) / openings_last_week) * 100, 1)
+            if openings_last_week > 0
+            else (100.0 if openings_this_week > 0 else 0.0)
+        )
+
+        interviews_this_7d = (
+            session.exec(
+                select(func.count(Interview.id)).where(
+                    Interview.user_id == user_id,
+                    Interview.status != InterviewStatus.cancelled,
+                    Interview.start_time >= seven_days_ago,
+                )
+            ).one()
+            or 0
+        )
+        interviews_prior_7d = (
+            session.exec(
+                select(func.count(Interview.id)).where(
+                    Interview.user_id == user_id,
+                    Interview.status != InterviewStatus.cancelled,
+                    Interview.start_time >= fourteen_days_ago,
+                    Interview.start_time < seven_days_ago,
+                )
+            ).one()
+            or 0
+        )
+        interviews_trend_pct = (
+            round(((interviews_this_7d - interviews_prior_7d) / interviews_prior_7d) * 100, 1)
+            if interviews_prior_7d > 0
+            else (100.0 if interviews_this_7d > 0 else 0.0)
+        )
+
+        # 5c. Applications over time timeline (last 14 days)
+        applications_timeline: List[Dict[str, Any]] = []
+        for day_offset in range(13, -1, -1):
+            day_start = start_of_today - timedelta(days=day_offset)
+            day_end = day_start + timedelta(days=1)
+            cnt = (
+                session.exec(
+                    select(func.count(Candidate.id)).where(
+                        Candidate.user_id == user_id,
+                        Candidate.created_at >= day_start,
+                        Candidate.created_at < day_end,
+                    )
+                ).one()
+                or 0
+            )
+            applications_timeline.append({
+                "date": day_start.strftime("%Y-%m-%d"),
+                "label": day_start.strftime("%b %d"),
+                "day": day_start.strftime("%a"),
+                "count": cnt,
+            })
 
         # 6. Messages awaiting reply & threads
         user_candidates = session.exec(
@@ -298,6 +415,36 @@ class DashboardService:
                 "status": up.status.value if hasattr(up.status, "value") else str(up.status),
             })
 
+        # 12. Recent audit activity feed
+        recent_logs = session.exec(
+            select(AuditLog)
+            .where(AuditLog.user_id == user_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(10)
+        ).all()
+
+        recent_activity: List[Dict[str, Any]] = []
+        for log in recent_logs:
+            cand_name = None
+            if log.candidate_id:
+                cand = session.exec(select(Candidate.name).where(Candidate.id == log.candidate_id)).first()
+                cand_name = cand
+            op_title = None
+            if log.opening_id:
+                op = session.exec(select(JobOpening.title).where(JobOpening.id == log.opening_id)).first()
+                op_title = op
+            recent_activity.append({
+                "id": str(log.id),
+                "action": log.action,
+                "candidate_id": str(log.candidate_id) if log.candidate_id else None,
+                "candidate_name": cand_name,
+                "opening_title": op_title,
+                "from_stage": log.from_stage,
+                "to_stage": log.to_stage,
+                "details": log.details,
+                "created_at": log.created_at.isoformat(),
+            })
+
         return DashboardStatsResponse(
             total_openings=total_openings,
             active_openings=active_openings,
@@ -309,10 +456,17 @@ class DashboardService:
             pending_reviews=pending_reviews,
             messages_awaiting_reply=messages_awaiting_reply,
             interviews_this_week=interviews_this_week,
+            interviews_today=interviews_today,
+            candidates_trend_pct=candidates_trend_pct,
+            candidates_this_week=cands_this_week,
+            openings_trend_pct=openings_trend_pct,
+            interviews_trend_pct=interviews_trend_pct,
             time_to_shortlist_hours=time_to_shortlist_hours,
             stage_breakdown=stage_breakdown,
             funnel_by_stage=funnel_by_stage,
+            applications_timeline=applications_timeline,
             recent_candidates=recent_list,
+            recent_activity=recent_activity,
             openings_summary=openings_summary,
             upcoming_interviews=upcoming_interviews,
             awaiting_reply_threads=awaiting_reply_threads,

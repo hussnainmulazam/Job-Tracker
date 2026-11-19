@@ -2,42 +2,63 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Plus,
   Kanban,
   Briefcase,
   Sparkles,
   RefreshCw,
-  AlertCircle,
-  TrendingUp,
+  Mail,
   ArrowRight,
   Scale,
   Users,
+  Calendar,
+  CheckCircle2,
 } from "lucide-react";
-import { dashboardApi, candidatesApi, jobOpeningsApi, Candidate } from "@/lib/api";
+import {
+  dashboardApi,
+  candidatesApi,
+  jobOpeningsApi,
+  googleApi,
+  apiFetch,
+  Candidate,
+} from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatsHeader } from "@/components/dashboard/stats-header";
-import { ApplicationsChart } from "@/components/dashboard/applications-chart";
-import { RecentActivity } from "@/components/dashboard/recent-activity";
-import {
-  UpcomingInterviewsWidget,
-  AwaitingReplyWidget,
-} from "@/components/dashboard/dashboard-widgets";
+import { HiringFunnelChart } from "@/components/dashboard/hiring-funnel-chart";
+import { ApplicationsTimelineChart } from "@/components/dashboard/applications-timeline-chart";
+import { UpcomingInterviewsList } from "@/components/dashboard/upcoming-interviews-list";
+import { RecentActivityFeed } from "@/components/dashboard/recent-activity-feed";
 import { AddCandidateDialog } from "@/components/candidates/add-candidate-dialog";
 import { CreateOpeningDialog } from "@/components/openings/create-opening-dialog";
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
+import { useToast } from "@/components/ui/use-toast";
+
+interface UserProfile {
+  id: string;
+  email: string;
+}
 
 export default function DashboardPage() {
+  const { toast } = useToast();
   const [addCandidateOpen, setAddCandidateOpen] = useState(false);
   const [createOpeningOpen, setCreateOpeningOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // 1. Fetch live dashboard metrics
+  // 1. Fetch current user identity for greeting
+  const { data: user } = useQuery<UserProfile>({
+    queryKey: ["current-user"],
+    queryFn: () => apiFetch<UserProfile>("/api/v1/auth/me"),
+    retry: false,
+  });
+
+  // 2. Fetch live dashboard metrics directly from DB
   const {
     data: stats,
     isLoading,
@@ -49,12 +70,33 @@ export default function DashboardPage() {
     queryFn: () => dashboardApi.getStats(),
   });
 
-  // 2. Fetch job openings for quick modals
+  // 3. Fetch active job openings for modals
   const { data: openingsData } = useQuery({
     queryKey: ["job-openings"],
     queryFn: () => jobOpeningsApi.list(),
   });
   const openings = openingsData?.items || [];
+
+  // 4. Gmail Sync Mutation (Quick Action)
+  const syncGmailMutation = useMutation({
+    mutationFn: () => googleApi.syncGmail(),
+    onSuccess: (res) => {
+      refetch();
+      toast({
+        title: "Gmail Sync Completed",
+        description: `Found ${res.messages_found} messages. Created ${res.candidates_created} candidate(s), saved ${res.attachments_saved} resumes.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Sync Failed",
+        description:
+          err?.message ||
+          "Could not sync Gmail. Please verify your Google Workspace connection in Settings.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleSelectCandidateId = async (id: string) => {
     try {
@@ -68,26 +110,47 @@ export default function DashboardPage() {
 
   return (
     <AppShell title="Dashboard">
-      <div className="space-y-6 pb-8">
+      <div className="space-y-6 pb-12">
         <PageHeader
           title="Talent Intelligence Dashboard"
-          description="Real-time hiring velocity, candidate pipeline distribution, and system performance metrics."
-          badge="Live Metrics"
+          description="Real-time hiring velocity, candidate intake trends, and synchronized interview operations."
+          badge={
+            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live Database Counts</span>
+            </Badge>
+          }
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => syncGmailMutation.mutate()}
+                disabled={syncGmailMutation.isPending}
+                className="gap-1.5 text-xs h-8"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 text-primary ${
+                    syncGmailMutation.isPending ? "animate-spin" : ""
+                  }`}
+                />
+                <span>{syncGmailMutation.isPending ? "Syncing..." : "Sync Gmail"}</span>
+              </Button>
+
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setCreateOpeningOpen(true)}
-                className="gap-1.5"
+                className="gap-1.5 text-xs h-8"
               >
-                <Briefcase className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">New Requisition</span>
+                <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="hidden sm:inline">New Opening</span>
               </Button>
+
               <Button
                 size="sm"
                 onClick={() => setAddCandidateOpen(true)}
-                className="gap-1.5 font-medium shadow-xs"
+                className="gap-1.5 text-xs h-8 font-medium shadow-xs"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>Add Candidate</span>
@@ -105,16 +168,34 @@ export default function DashboardPage() {
           />
         )}
 
-        {/* 1. Real Stat Metric Cards */}
-        <StatsHeader stats={stats} isLoading={isLoading} />
+        {/* ── 1. Top Greeting, Today's Priorities & KPI Cards with Trend ───────── */}
+        <StatsHeader
+          stats={stats}
+          isLoading={isLoading}
+          userName={user?.email}
+          onAddCv={() => setAddCandidateOpen(true)}
+          onNewOpening={() => setCreateOpeningOpen(true)}
+          onSyncGmail={() => syncGmailMutation.mutate()}
+          isSyncingGmail={syncGmailMutation.isPending}
+        />
 
-        {/* 2. Charts and Activity Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <ApplicationsChart stats={stats} isLoading={isLoading} />
+        {/* ── 2. Charts Section: Hiring Funnel + Applications Over Time ────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-6">
+            <HiringFunnelChart stats={stats} isLoading={isLoading} />
           </div>
-          <div className="lg:col-span-1">
-            <RecentActivity
+          <div className="lg:col-span-6">
+            <ApplicationsTimelineChart stats={stats} isLoading={isLoading} />
+          </div>
+        </div>
+
+        {/* ── 3. Operational Pulse: Upcoming Interviews & Recent Activity ───────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-7">
+            <UpcomingInterviewsList stats={stats} isLoading={isLoading} />
+          </div>
+          <div className="lg:col-span-5">
+            <RecentActivityFeed
               stats={stats}
               isLoading={isLoading}
               onSelectCandidate={handleSelectCandidateId}
@@ -123,48 +204,42 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 3. Live Recruiting Pulse: Upcoming Interviews & Inbound Email Queue */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <UpcomingInterviewsWidget stats={stats} isLoading={isLoading} />
-          <AwaitingReplyWidget stats={stats} isLoading={isLoading} />
-        </div>
-
-        {/* Quick Launch Cards */}
+        {/* ── 4. Quick Launch Cards ────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
           <Link href="/pipeline" className="group">
-            <div className="rounded-lg border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-primary/50 transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
+            <div className="rounded-xl border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-border transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
               <div className="flex items-center justify-between mb-2">
-                <div className="h-7 w-7 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <div className="h-7 w-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
                   <Kanban className="h-3.5 w-3.5" />
                 </div>
                 <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
               </div>
               <h3 className="text-xs font-semibold text-foreground">Candidate Pipeline</h3>
               <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                Visual Kanban workflow across Applied, Screening, Interview, Offer, and Rejected.
+                Drag-and-drop Kanban workflow across Applied, Screening, Interview, Offer, and Rejected.
               </p>
             </div>
           </Link>
 
           <Link href="/openings" className="group">
-            <div className="rounded-lg border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-primary/50 transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
+            <div className="rounded-xl border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-border transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
               <div className="flex items-center justify-between mb-2">
-                <div className="h-7 w-7 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                <div className="h-7 w-7 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
                   <Briefcase className="h-3.5 w-3.5" />
                 </div>
                 <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
               </div>
               <h3 className="text-xs font-semibold text-foreground">Job Openings</h3>
               <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                Manage requisitions, criteria, screening results, and Google Sheets synchronization.
+                Manage requisitions, evaluation criteria, and candidate capacity.
               </p>
             </div>
           </Link>
 
           <Link href="/compare" className="group">
-            <div className="rounded-lg border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-primary/50 transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
+            <div className="rounded-xl border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-border transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
               <div className="flex items-center justify-between mb-2">
-                <div className="h-7 w-7 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <div className="h-7 w-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
                   <Scale className="h-3.5 w-3.5" />
                 </div>
                 <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
