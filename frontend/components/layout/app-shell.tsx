@@ -22,6 +22,7 @@ import {
   LogOut,
   Users,
   MessageSquare,
+  Mail,
   Clock,
   Send,
 } from "lucide-react";
@@ -62,9 +63,9 @@ const NAV_ITEMS = [
     badge: null,
   },
   {
-    label: "Unified Inbox",
+    label: "Recruiting Inbox",
     href: "/inbox",
-    icon: MessageSquare,
+    icon: Mail,
     badge: null,
   },
   {

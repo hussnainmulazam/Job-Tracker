@@ -355,6 +355,25 @@ def update_candidate_stage(
 
 
 @router.post(
+    "/{candidate_id}/resend-auto-reply",
+    response_model=CandidateRead,
+    status_code=status.HTTP_200_OK,
+    summary="Resend 'CV received' email to candidate from recruiter's Gmail",
+)
+def resend_auto_reply(
+    candidate_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> CandidateRead:
+    """Manually dispatch or re-try the Initial Message 'CV received' confirmation email."""
+    return candidate_service.resend_auto_reply(
+        session=session,
+        user_id=current_user.id,
+        candidate_id=candidate_id,
+    )
+
+
+@router.post(
     "/{candidate_id}/score",
     response_model=CandidateScreenResult,
     status_code=status.HTTP_200_OK,

@@ -112,6 +112,10 @@ class CandidateRead(BaseModel):
     red_flags: List[str] = Field(default_factory=list)
     summary: Optional[str] = None
     stage: CandidateStage
+    auto_reply_sent: bool = False
+    auto_reply_status: Optional[str] = None
+    auto_reply_error: Optional[str] = None
+    auto_reply_sent_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     scorecards: Optional[List[ScorecardRead]] = None

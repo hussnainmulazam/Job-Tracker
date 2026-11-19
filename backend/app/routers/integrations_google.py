@@ -134,6 +134,8 @@ def update_sync_settings(
         account.sync_query = payload.sync_query
     if payload.sync_label is not None:
         account.sync_label = payload.sync_label
+    if payload.auto_reply_enabled is not None:
+        account.auto_reply_enabled = payload.auto_reply_enabled
 
     session.add(account)
     session.commit()

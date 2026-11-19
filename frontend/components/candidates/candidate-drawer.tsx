@@ -245,6 +245,29 @@ export function CandidateDrawer({
     },
   });
 
+  // Resend 'CV Received' Confirmation Auto-Reply
+  const resendAutoReplyMutation = useMutation({
+    mutationFn: (id: string) => candidatesApi.resendAutoReply(id),
+    onSuccess: (updated) => {
+      toast({
+        title: "CV Confirmation Dispatched",
+        description: `Confirmation email was sent to ${updated.email}.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["candidate-audit-logs", candidate?.id] });
+      onCandidateUpdated?.(updated);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Auto-Reply Dispatch Failed",
+        description: err.message || "Could not send CV received confirmation email.",
+        variant: "destructive",
+      });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["candidate-audit-logs", candidate?.id] });
+    },
+  });
+
   const handleDeleteCandidate = () => {
     if (!candidate) return;
     if (confirm(`Are you sure you want to delete candidate "${candidate.name}"?`)) {
@@ -517,6 +540,55 @@ export function CandidateDrawer({
               Copy CV
             </Button>
           </div>
+
+          {/* ── Auto-Reply "CV Received" Status Banner & Resend ───────── */}
+          <div className="mt-3 pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                CV Acknowledgement:
+              </span>
+              {candidate.auto_reply_sent ? (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                  <span>
+                    Sent {candidate.auto_reply_sent_at ? new Date(candidate.auto_reply_sent_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+                  </span>
+                </div>
+              ) : candidate.auto_reply_status === "failed" ? (
+                <div className="flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400 font-medium bg-rose-500/10 px-2 py-0.5 rounded-md border border-rose-500/20">
+                  <AlertTriangle className="h-3 w-3 text-rose-500" />
+                  <span>Dispatch Failed</span>
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground italic">Not sent</span>
+              )}
+            </div>
+
+            <Button
+              size="sm"
+              variant={candidate.auto_reply_status === "failed" ? "destructive" : "outline"}
+              onClick={() => resendAutoReplyMutation.mutate(candidate.id)}
+              disabled={resendAutoReplyMutation.isPending || !candidate.email || candidate.email.endsWith("@no-email.com")}
+              className="h-7 text-xs gap-1.5 font-medium"
+            >
+              {resendAutoReplyMutation.isPending ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              <span>{candidate.auto_reply_sent ? "Resend CV Receipt Email" : "Send CV Receipt Email"}</span>
+            </Button>
+          </div>
+
+          {candidate.auto_reply_status === "failed" && candidate.auto_reply_error && (
+            <div className="mt-2 p-2.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-start gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+              <div className="space-y-0.5">
+                <p className="font-semibold text-[11px] uppercase tracking-wider">Delivery Error Detail</p>
+                <p className="font-mono text-[11px] break-all">{candidate.auto_reply_error}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Tabs Navigation ───────────────────────────────────────── */}

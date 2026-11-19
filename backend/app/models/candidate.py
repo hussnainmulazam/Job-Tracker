@@ -97,6 +97,15 @@ class Candidate(SQLModel, table=True):
         sa_column=Column(sa.JSON, nullable=False, server_default="{}"),
     )
 
+    # Automated Email Auto-Reply Tracking
+    auto_reply_sent: bool = Field(default=False, nullable=False)
+    auto_reply_status: Optional[str] = Field(default=None, max_length=50, nullable=True)  # "sent", "failed"
+    auto_reply_error: Optional[str] = Field(default=None, sa_column=Column(sa.Text, nullable=True))
+    auto_reply_sent_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=True),
+    )
+
     # WhatsApp Cloud API Messaging & Compliance
     whatsapp_opt_in: bool = Field(default=False, nullable=False)
     whatsapp_opt_in_at: Optional[datetime] = Field(

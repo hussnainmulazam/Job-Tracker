@@ -35,6 +35,7 @@ class GoogleAccountStatusResponse(BaseModel):
         description="Gmail search filter query used for syncing candidate resumes",
     )
     sync_label: str = Field(default="INBOX", description="Gmail label to sync from")
+    auto_reply_enabled: bool = Field(default=True, description="Whether to automatically send CV received email on intake")
     default_opening_id: Optional[uuid.UUID] = Field(default=None, description="Default job opening for incoming resumes without subject match")
     default_opening_title: Optional[str] = Field(default=None, description="Title of default job opening")
     total_emails_synced: int = Field(default=0, description="Total resume emails processed")
@@ -45,6 +46,7 @@ class GoogleAccountStatusResponse(BaseModel):
 class GoogleAccountUpdateRequest(BaseModel):
     sync_query: Optional[str] = Field(default=None, min_length=1, max_length=500)
     sync_label: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    auto_reply_enabled: Optional[bool] = Field(default=None, description="Toggle auto-reply confirmation email")
     default_opening_id: Optional[uuid.UUID] = Field(default=None, description="Set default job opening for Gmail resumes")
 
 

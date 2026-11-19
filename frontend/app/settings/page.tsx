@@ -92,6 +92,7 @@ export default function SettingsPage() {
   const [filterQuery, setFilterQuery] = useState("");
   const [filterLabel, setFilterLabel] = useState("");
   const [defaultOpeningId, setDefaultOpeningId] = useState("");
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const [filterInitialized, setFilterInitialized] = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState<GmailSyncResponse | null>(null);
 
@@ -174,6 +175,7 @@ export default function SettingsPage() {
       setFilterQuery(googleStatus.sync_query || "has:attachment (filename:pdf OR filename:docx) newer_than:30d");
       setFilterLabel(googleStatus.sync_label || "INBOX");
       setDefaultOpeningId(googleStatus.default_opening_id || "");
+      setAutoReplyEnabled(googleStatus.auto_reply_enabled ?? true);
       setFilterInitialized(true);
     }
   }, [googleStatus, filterInitialized]);
@@ -277,13 +279,14 @@ export default function SettingsPage() {
         sync_query: filterQuery,
         sync_label: filterLabel,
         default_opening_id: defaultOpeningId || null,
+        auto_reply_enabled: autoReplyEnabled,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["google-status"] });
       toast({
         title: "Filter Settings Saved",
-        description: "Gmail resume search query, label, and default opening updated.",
+        description: "Gmail resume search query, default opening, and auto-reply preference updated.",
       });
     },
     onError: (err: any) => {
@@ -681,6 +684,34 @@ export default function SettingsPage() {
                         ))}
                       </select>
                     </div>
+
+                    {/* Automatic CV Received Auto-Reply Toggle */}
+                    <div className="sm:col-span-2 pt-2 border-t">
+                      <div className="flex items-center justify-between p-2.5 rounded-md border bg-muted/20">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-foreground">
+                              Automatic &quot;CV Received&quot; Confirmation Email
+                            </span>
+                            <Badge variant={autoReplyEnabled ? "outline" : "secondary"} className="text-[10px] h-4 px-1.5 font-normal">
+                              {autoReplyEnabled ? "Active" : "Disabled"}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            When enabled, HR automatically sends an acknowledgement email to applicant with the &quot;Initial Message&quot; template upon CV ingestion.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={autoReplyEnabled}
+                            onChange={(e) => setAutoReplyEnabled(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-8 h-4 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+                        </label>
+                      </div>
+                    </div>
                   </div>
                   <div className="flex justify-end pt-1">
                     <Button
@@ -691,7 +722,7 @@ export default function SettingsPage() {
                       className="h-7 text-xs gap-1.5"
                     >
                       <Save className="h-3 w-3" />
-                      <span>{saveSettingsMutation.isPending ? "Saving..." : "Save Filter Rules"}</span>
+                      <span>{saveSettingsMutation.isPending ? "Saving..." : "Save Settings"}</span>
                     </Button>
                   </div>
                 </div>

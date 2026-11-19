@@ -329,6 +329,7 @@ class GoogleService:
                 sync_label="INBOX",
                 default_opening_id=None,
                 default_opening_title=None,
+                auto_reply_enabled=False,
                 total_emails_synced=0,
             )
 
@@ -457,6 +458,7 @@ class GoogleService:
             last_sync_status=account.last_sync_status,
             sync_query=account.sync_query or DEFAULT_GMAIL_QUERY,
             sync_label=account.sync_label or "INBOX",
+            auto_reply_enabled=getattr(account, "auto_reply_enabled", True),
             default_opening_id=account.default_opening_id,
             default_opening_title=default_title,
             total_emails_synced=total_synced,
@@ -521,6 +523,8 @@ class GoogleService:
         user_id: uuid.UUID,
         override_query: Optional[str] = None,
         override_label: Optional[str] = None,
+        query: Optional[str] = None,
+        label: Optional[str] = None,
     ) -> GmailSyncResponse:
         """
         Incremental Gmail sync job:
@@ -539,8 +543,8 @@ class GoogleService:
         if not account:
             raise ValueError("No Google account connected. Please connect Google first.")
 
-        query = override_query or account.sync_query or DEFAULT_GMAIL_QUERY
-        label = override_label or account.sync_label
+        query = query or override_query or account.sync_query or DEFAULT_GMAIL_QUERY
+        label = label or override_label or account.sync_label
         account.last_sync_status = "in_progress"
         self.session.add(account)
         self.session.commit()
@@ -1058,7 +1062,17 @@ class GoogleService:
 
         # Select template
         tmpl = request.template_name.lower()
-        if tmpl == "interview_invitation":
+        if tmpl in ("initial_message", "cv_received"):
+            subject = f"Application Received: {role_name} at {company_name}"
+            body = (
+                f"Hi {candidate.name},\n\n"
+                f"Thank you for submitting your CV for the {role_name} position at {company_name}. "
+                f"We have received your application and our recruitment team is reviewing your profile.\n\n"
+                f"If your background aligns with our criteria, we will reach out shortly regarding next steps.\n\n"
+                f"Best regards,\n"
+                f"Recruiting & Talent Acquisition Team\n{company_name}"
+            )
+        elif tmpl == "interview_invitation":
             subject = f"Interview Invitation: {role_name} at {company_name}"
             body = (
                 f"Hi {candidate.name},\n\n"

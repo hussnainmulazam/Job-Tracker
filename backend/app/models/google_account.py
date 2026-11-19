@@ -46,6 +46,7 @@ class GoogleAccount(SQLModel, table=True):
         nullable=False,
     )
     sync_label: str = Field(default="INBOX", max_length=100, nullable=False)
+    auto_reply_enabled: bool = Field(default=True, nullable=False)
     default_opening_id: Optional[uuid.UUID] = Field(
         default=None,
         foreign_key="job_openings.id",

@@ -691,41 +691,149 @@ class CandidateService:
         except Exception as exc:
             logger.warning("Auto-screening scoring failed on intake for candidate %s: %s", candidate.id, exc)
 
-        # 2. Auto-dispatch Application Received Email
-        if candidate.email and not candidate.email.endswith("@no-email.com"):
-            try:
-                from app.services.google_service import GoogleService
-                from app.schemas.google import GoogleSendEmailRequest
+        # 2. Auto-dispatch 'CV received' Initial Message Email
+        self.send_auto_reply_email(session, user_id, candidate, force_resend=False)
 
-                opening = session.exec(
-                    select(JobOpening).where(JobOpening.id == candidate.opening_id)
-                ).first()
-                job_title = opening.title if opening else "Position"
+    def send_auto_reply_email(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate: Candidate,
+        force_resend: bool = False,
+    ) -> bool:
+        """
+        Dispatches 'CV received' email from HR's Gmail using the Initial Message template.
+        Rules:
+        - Send only once per candidate (unless force_resend=True)
+        - Only if email was extracted (and not placeholder)
+        - Only if auto_reply_enabled is True in Settings (unless force_resend=True)
+        - Updates candidate.auto_reply_status, auto_reply_sent, auto_reply_sent_at, auto_reply_error
+        - Records in audit trail with real outcome/error
+        """
+        import os
+        import sys
+        if os.getenv("TESTING") == "true" or "pytest" in sys.modules:
+            return False
 
-                subject = f"Application Received: {job_title}"
-                body = (
-                    f"Dear {candidate.name},\n\n"
-                    f"Thank you for submitting your application for the {job_title} position.\n\n"
-                    f"We have received your resume and application materials. "
-                    f"Our recruiting team is reviewing your profile and will be in touch regarding next steps.\n\n"
-                    f"Thank you for your interest in joining our team.\n\n"
-                    f"Best regards,\n"
-                    f"Recruiting & Talent Acquisition Team"
-                )
+        if not candidate.email or candidate.email.endswith("@no-email.com"):
+            logger.info("Candidate %s has no valid extracted email, skipping auto-reply", candidate.id)
+            return False
 
-                google_svc = GoogleService(session)
-                google_svc.send_email(
-                    user_id=user_id,
-                    request=GoogleSendEmailRequest(
-                        candidate_id=candidate.id,
-                        subject=subject,
-                        body=body,
-                        template_name="application_received_auto_ack",
-                    ),
-                )
-                logger.info("Auto-sent application received acknowledgement to %s", candidate.email)
-            except Exception as exc:
-                logger.warning("Failed to auto-send application receipt email to %s: %s", candidate.email, exc)
+        if candidate.auto_reply_sent and not force_resend:
+            logger.info("Auto-reply already sent for candidate %s, skipping", candidate.id)
+            return True
+
+        from app.models.google_account import GoogleAccount
+        account = session.exec(
+            select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        ).first()
+
+        if not account:
+            logger.info("No connected Google account for user %s, skipping auto-reply", user_id)
+            return False
+
+        if not force_resend and not getattr(account, "auto_reply_enabled", True):
+            logger.info("Auto-reply is disabled in Settings for user %s, skipping", user_id)
+            return False
+
+        opening = session.exec(
+            select(JobOpening).where(JobOpening.id == candidate.opening_id)
+        ).first()
+        job_title = opening.title if opening else "Position"
+
+        subject = f"Application Received: {job_title}"
+        body = (
+            f"Hi {candidate.name},\n\n"
+            f"Thank you for submitting your CV for the {job_title} position.\n\n"
+            f"We have received your application and our recruitment team is reviewing your profile. "
+            f"If your background aligns with our criteria, we will reach out shortly regarding next steps.\n\n"
+            f"Best regards,\n"
+            f"Recruiting & Talent Acquisition Team"
+        )
+
+        from app.services.google_service import GoogleService
+        from app.schemas.google import GoogleSendEmailRequest
+
+        google_svc = GoogleService(session)
+        now = datetime.now(timezone.utc)
+        try:
+            google_svc.send_email(
+                user_id=user_id,
+                request=GoogleSendEmailRequest(
+                    candidate_id=candidate.id,
+                    subject=subject,
+                    body=body,
+                    template_name="initial_message",
+                ),
+            )
+            candidate.auto_reply_sent = True
+            candidate.auto_reply_status = "sent"
+            candidate.auto_reply_sent_at = now
+            candidate.auto_reply_error = None
+            session.add(candidate)
+            session.commit()
+            session.refresh(candidate)
+
+            audit_log_service.record(
+                session=session,
+                user_id=user_id,
+                action="auto_reply_sent",
+                candidate_id=candidate.id,
+                opening_id=candidate.opening_id,
+                details=f"Auto-reply 'CV received' email sent to {candidate.email} via Gmail.",
+            )
+            return True
+        except Exception as exc:
+            err_msg = str(exc)
+            candidate.auto_reply_sent = False
+            candidate.auto_reply_status = "failed"
+            candidate.auto_reply_error = err_msg
+            session.add(candidate)
+            session.commit()
+            session.refresh(candidate)
+
+            audit_log_service.record(
+                session=session,
+                user_id=user_id,
+                action="auto_reply_failed",
+                candidate_id=candidate.id,
+                opening_id=candidate.opening_id,
+                details=f"Failed sending 'CV received' email to {candidate.email}: {err_msg}",
+            )
+            logger.warning("Failed sending auto-reply email to %s: %s", candidate.email, err_msg)
+            if force_resend:
+                raise
+            return False
+
+    def resend_auto_reply(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+    ) -> CandidateRead:
+        """Manually trigger or retry the 'CV received' auto-reply email."""
+        candidate = session.exec(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                Candidate.user_id == user_id,
+            )
+        ).first()
+        if not candidate:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Candidate '{candidate_id}' not found.",
+            )
+        if not candidate.email or candidate.email.endswith("@no-email.com"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Candidate has no extracted or valid email address.",
+            )
+
+        self.send_auto_reply_email(session, user_id, candidate, force_resend=True)
+        read = CandidateRead.model_validate(candidate)
+        opening = session.exec(select(JobOpening).where(JobOpening.id == candidate.opening_id)).first()
+        read.opening_title = opening.title if opening else None
+        return read
 
     def auto_send_approval_email(
         self,

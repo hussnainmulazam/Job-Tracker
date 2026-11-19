@@ -229,6 +229,10 @@ export interface Candidate {
   red_flags: string[];
   summary?: string | null;
   stage: CandidateStage;
+  auto_reply_sent?: boolean;
+  auto_reply_status?: string | null;
+  auto_reply_error?: string | null;
+  auto_reply_sent_at?: string | null;
   created_at: string;
   updated_at: string;
   whatsapp_opt_in?: boolean;
@@ -725,6 +729,9 @@ export const candidatesApi = {
   getAuditLogs: (candidateId: string) =>
     api.get<AuditLog[]>(`/api/v1/candidates/${candidateId}/audit-logs`),
 
+  resendAutoReply: (candidateId: string) =>
+    api.post<Candidate>(`/api/v1/candidates/${candidateId}/resend-auto-reply`),
+
   delete: (id: string) => api.delete<void>(`/api/v1/candidates/${id}`),
 };
 
@@ -797,6 +804,7 @@ export interface GoogleAccountStatus {
   last_sync_status: string;
   sync_query: string;
   sync_label: string;
+  auto_reply_enabled?: boolean;
   default_opening_id?: string | null;
   default_opening_title?: string | null;
   total_emails_synced: number;
@@ -867,7 +875,7 @@ export const googleApi = {
     const qs = searchParams.toString();
     return api.post<GmailSyncResponse>(`/api/v1/integrations/google/sync${qs ? `?${qs}` : ""}`);
   },
-  updateSettings: (data: { sync_query?: string; sync_label?: string; default_opening_id?: string | null }) =>
+  updateSettings: (data: { sync_query?: string; sync_label?: string; default_opening_id?: string | null; auto_reply_enabled?: boolean }) =>
     api.patch<GoogleAccountStatus>("/api/v1/integrations/google/settings", data),
   previewEmail: (data: GooglePreviewEmailRequest) =>
     api.post<GooglePreviewEmailResponse>("/api/v1/integrations/google/preview-email", data),
