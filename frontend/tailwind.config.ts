@@ -57,6 +57,17 @@ const config: Config = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      boxShadow: {
+        xs: "0 1px 2px 0 rgb(0 0 0 / 0.04)",
+        card: "0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px 0 rgba(0, 0, 0, 0.04)",
+        "card-hover": "0 0 0 1px rgba(0, 0, 0, 0.08), 0 4px 12px 0 rgba(0, 0, 0, 0.06)",
+        dropdown: "0 4px 20px -2px rgba(0, 0, 0, 0.12), 0 2px 6px -1px rgba(0, 0, 0, 0.08)",
+      },
+      letterSpacing: {
+        tightest: "-0.035em",
+        tighter: "-0.02em",
+        tight: "-0.01em",
+      },
     },
   },
   plugins: [require("tailwindcss-animate")],

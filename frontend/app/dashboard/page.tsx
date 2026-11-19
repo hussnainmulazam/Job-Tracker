@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { dashboardApi, candidatesApi, jobOpeningsApi, Candidate } from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { StatsHeader } from "@/components/dashboard/stats-header";
 import { ApplicationsChart } from "@/components/dashboard/applications-chart";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
@@ -66,31 +67,35 @@ export default function DashboardPage() {
   };
 
   return (
-    <AppShell
-      title="Recruiting Command Center"
-      actions={
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCreateOpeningOpen(true)}
-            className="h-8 gap-1.5 text-xs"
-          >
-            <Briefcase className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">New Requisition</span>
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => setAddCandidateOpen(true)}
-            className="h-8 gap-1.5 text-xs font-semibold shadow-xs"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Add Candidate</span>
-          </Button>
-        </div>
-      }
-    >
+    <AppShell title="Dashboard">
       <div className="space-y-6 pb-8">
+        <PageHeader
+          title="Talent Intelligence Dashboard"
+          description="Real-time hiring velocity, candidate pipeline distribution, and system performance metrics."
+          badge="Live Metrics"
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCreateOpeningOpen(true)}
+                className="gap-1.5"
+              >
+                <Briefcase className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">New Requisition</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setAddCandidateOpen(true)}
+                className="gap-1.5 font-medium shadow-xs"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Candidate</span>
+              </Button>
+            </div>
+          }
+        />
+
         {/* Error State with Retry Button */}
         {isError && (
           <ErrorState
@@ -125,48 +130,48 @@ export default function DashboardPage() {
         </div>
 
         {/* Quick Launch Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
           <Link href="/pipeline" className="group">
-            <div className="rounded-xl border border-border p-4 bg-card hover:border-primary/50 transition-colors shadow-2xs">
+            <div className="rounded-lg border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-primary/50 transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
               <div className="flex items-center justify-between mb-2">
-                <div className="h-8 w-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                  <Kanban className="h-4 w-4" />
+                <div className="h-7 w-7 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Kanban className="h-3.5 w-3.5" />
                 </div>
-                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
               </div>
-              <h3 className="text-xs font-bold text-foreground">Candidate Pipeline</h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Drag-and-drop Kanban across Applied, Screening, Interview, Offer, and Rejected.
+              <h3 className="text-xs font-semibold text-foreground">Candidate Pipeline</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                Visual Kanban workflow across Applied, Screening, Interview, Offer, and Rejected.
               </p>
             </div>
           </Link>
 
           <Link href="/openings" className="group">
-            <div className="rounded-xl border border-border p-4 bg-card hover:border-primary/50 transition-colors shadow-2xs">
+            <div className="rounded-lg border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-primary/50 transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
               <div className="flex items-center justify-between mb-2">
-                <div className="h-8 w-8 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-                  <Briefcase className="h-4 w-4" />
+                <div className="h-7 w-7 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                  <Briefcase className="h-3.5 w-3.5" />
                 </div>
-                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
               </div>
-              <h3 className="text-xs font-bold text-foreground">Job Openings</h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Manage requisitions, trigger bulk AI scoring, and export CSV shortlists.
+              <h3 className="text-xs font-semibold text-foreground">Job Openings</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                Manage requisitions, criteria, screening results, and Google Sheets synchronization.
               </p>
             </div>
           </Link>
 
           <Link href="/compare" className="group">
-            <div className="rounded-xl border border-border p-4 bg-card hover:border-primary/50 transition-colors shadow-2xs">
+            <div className="rounded-lg border border-border/70 dark:border-white/[0.08] p-4 bg-card hover:border-primary/50 transition-all shadow-xs hover:shadow-card-hover hover:-translate-y-0.5">
               <div className="flex items-center justify-between mb-2">
-                <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                  <Scale className="h-4 w-4" />
+                <div className="h-7 w-7 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <Scale className="h-3.5 w-3.5" />
                 </div>
-                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
               </div>
-              <h3 className="text-xs font-bold text-foreground">Candidate Comparison</h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Side-by-side evaluation of skills match, score rings, and red flags.
+              <h3 className="text-xs font-semibold text-foreground">Candidate Comparison</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                Side-by-side evaluation of skills match, score rings, and CV red flags.
               </p>
             </div>
           </Link>

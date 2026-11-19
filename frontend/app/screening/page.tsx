@@ -23,6 +23,8 @@ import {
   JobOpening,
 } from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { ScoreRing } from "@/components/ui/score-ring";
@@ -99,17 +101,76 @@ export default function ScreeningHubPage() {
   };
 
   return (
-    <AppShell title="AI Screening & Question Studio">
+    <AppShell title="AI Screening Studio">
       <div className="space-y-6 pb-12">
-        {/* Candidate Selector */}
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-border bg-card shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-primary shrink-0" />
-            <span className="text-xs font-bold text-foreground">Select Candidate:</span>
+        <PageHeader
+          title="AI Candidate Screening & Question Studio"
+          description="Automated qualification scoring, matched skills vs gaps analysis, and targeted interview question generation."
+          badge={
+            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+              <Sparkles className="h-3 w-3 text-primary" />
+              <span>OpenRouter AI</span>
+            </Badge>
+          }
+          actions={
+            activeCandidate ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDrawerCandidate(activeCandidate);
+                    setDrawerOpen(true);
+                  }}
+                  className="gap-1.5"
+                >
+                  <span>Candidate Drawer</span>
+                  <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                </Button>
+
+                {activeCandidate.score !== null && activeCandidate.score !== undefined ? (
+                  <Button
+                    id="btn-rerun-screen"
+                    size="sm"
+                    onClick={() => scoreMutation.mutate({ id: activeCandidate.id, rerun: true })}
+                    disabled={scoreMutation.isPending}
+                    className="font-medium gap-1.5 shadow-xs"
+                  >
+                    {scoreMutation.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    <span>Re-evaluate</span>
+                  </Button>
+                ) : (
+                  <Button
+                    id="btn-run-screen"
+                    size="sm"
+                    onClick={() => scoreMutation.mutate({ id: activeCandidate.id, rerun: false })}
+                    disabled={scoreMutation.isPending}
+                    className="font-medium gap-1.5 shadow-xs"
+                  >
+                    {scoreMutation.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    <span>Run AI Screen</span>
+                  </Button>
+                )}
+              </div>
+            ) : undefined
+          }
+        >
+          {/* Candidate Selector */}
+          <div className="flex items-center gap-2 pt-1">
+            <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-medium text-muted-foreground">Select Candidate:</span>
             <select
               value={activeCandidate?.id || ""}
               onChange={(e) => setSelectedCandidateId(e.target.value)}
-              className="text-xs font-semibold h-8 px-3 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary min-w-[220px]"
+              className="text-xs font-semibold h-8 px-2.5 rounded-md border border-border/80 bg-card focus:outline-none focus:ring-1 focus:ring-primary min-w-[240px] cursor-pointer"
             >
               {candidates.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -118,56 +179,7 @@ export default function ScreeningHubPage() {
               ))}
             </select>
           </div>
-
-          {activeCandidate && (
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setDrawerCandidate(activeCandidate);
-                  setDrawerOpen(true);
-                }}
-                className="text-xs h-8 gap-1.5"
-              >
-                <span>Full Candidate Drawer</span>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-
-              {activeCandidate.score !== null && activeCandidate.score !== undefined ? (
-                <Button
-                  id="btn-rerun-screen"
-                  size="sm"
-                  onClick={() => scoreMutation.mutate({ id: activeCandidate.id, rerun: true })}
-                  disabled={scoreMutation.isPending}
-                  className="text-xs h-8 font-semibold gap-1.5 shadow-xs"
-                >
-                  {scoreMutation.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                  <span>Re-run</span>
-                </Button>
-              ) : (
-                <Button
-                  id="btn-run-screen"
-                  size="sm"
-                  onClick={() => scoreMutation.mutate({ id: activeCandidate.id, rerun: false })}
-                  disabled={scoreMutation.isPending}
-                  className="text-xs h-8 font-semibold gap-1.5 shadow-xs"
-                >
-                  {scoreMutation.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3.5 w-3.5" />
-                  )}
-                  <span>Run AI Screen</span>
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
+        </PageHeader>
 
         {/* Body */}
         {candidatesLoading ? (

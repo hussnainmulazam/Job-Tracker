@@ -117,24 +117,24 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
-      <Card className="w-full max-w-md shadow-lg border-slate-200 dark:border-slate-800">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+      <Card className="w-full max-w-md shadow-card border-border/70 dark:border-white/[0.08] rounded-2xl bg-card">
         <CardHeader className="space-y-2 text-center pb-6">
-          <div className="mx-auto h-12 w-12 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md mb-2">
-            <Briefcase className="h-6 w-6" />
+          <div className="mx-auto h-11 w-11 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shadow-xs mb-1">
+            <Briefcase className="h-5 w-5" />
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">
+          <CardTitle className="text-xl font-bold tracking-tight text-foreground">
             Create an account
           </CardTitle>
-          <CardDescription className="text-sm">
-            Start tracking job applications and tailoring CVs with AI
+          <CardDescription className="text-xs text-muted-foreground">
+            Start tracking job applications and tailoring candidate intake
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           {serverError && (
-            <div className="mb-5 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3.5 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-              <AlertCircle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+            <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <div className="flex-1 font-medium">{serverError}</div>
             </div>
           )}
@@ -142,7 +142,7 @@ export default function RegisterPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             {/* Email Field */}
             <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-xs font-semibold">
+              <Label htmlFor="email" className="text-xs font-medium text-foreground">
                 Email Address
               </Label>
               <div className="relative">
@@ -151,14 +151,14 @@ export default function RegisterPage() {
                   id="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="name@company.com"
-                  className={`pl-9 ${errors.email ? "border-red-500 focus-visible:ring-red-400" : ""}`}
+                  placeholder="recruiter@company.com"
+                  className={`pl-9 ${errors.email ? "border-destructive focus-visible:ring-destructive" : ""}`}
                   {...register("email")}
                   disabled={isSubmitting}
                 />
               </div>
               {errors.email && (
-                <p className="text-[11px] text-red-500 font-medium">
+                <p className="text-[11px] text-destructive font-medium">
                   {errors.email.message}
                 </p>
               )}
@@ -166,7 +166,7 @@ export default function RegisterPage() {
 
             {/* Password Field */}
             <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-xs font-semibold">
+              <Label htmlFor="password" className="text-xs font-medium text-foreground">
                 Password
               </Label>
               <div className="relative">
@@ -176,7 +176,7 @@ export default function RegisterPage() {
                   type={showPassword ? "text" : "password"}
                   autoComplete="new-password"
                   placeholder="Minimum 8 characters"
-                  className={`pl-9 pr-10 ${errors.password ? "border-red-500 focus-visible:ring-red-400" : ""}`}
+                  className={`pl-9 pr-10 ${errors.password ? "border-destructive focus-visible:ring-destructive" : ""}`}
                   {...register("password")}
                   disabled={isSubmitting}
                 />
@@ -195,13 +195,13 @@ export default function RegisterPage() {
                 </button>
               </div>
               {errors.password && (
-                <p className="text-[11px] text-red-500 font-medium">
+                <p className="text-[11px] text-destructive font-medium">
                   {errors.password.message}
                 </p>
               )}
               {/* Password strength hint */}
               {currentPassword && currentPassword.length >= 8 && (
-                <p className="text-[11px] text-emerald-600 flex items-center gap-1 font-medium">
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
                   <CheckCircle2 className="h-3.5 w-3.5" /> Password meets minimum length
                 </p>
               )}
@@ -209,7 +209,7 @@ export default function RegisterPage() {
 
             {/* Confirm Password Field */}
             <div className="space-y-1.5">
-              <Label htmlFor="confirmPassword" className="text-xs font-semibold">
+              <Label htmlFor="confirmPassword" className="text-xs font-medium text-foreground">
                 Confirm Password
               </Label>
               <div className="relative">
@@ -219,7 +219,7 @@ export default function RegisterPage() {
                   type={showConfirmPassword ? "text" : "password"}
                   autoComplete="new-password"
                   placeholder="Repeat your password"
-                  className={`pl-9 pr-10 ${errors.confirmPassword ? "border-red-500 focus-visible:ring-red-400" : ""}`}
+                  className={`pl-9 pr-10 ${errors.confirmPassword ? "border-destructive focus-visible:ring-destructive" : ""}`}
                   {...register("confirmPassword")}
                   disabled={isSubmitting}
                 />
@@ -238,7 +238,7 @@ export default function RegisterPage() {
                 </button>
               </div>
               {errors.confirmPassword && (
-                <p className="text-[11px] text-red-500 font-medium">
+                <p className="text-[11px] text-destructive font-medium">
                   {errors.confirmPassword.message}
                 </p>
               )}
@@ -246,7 +246,7 @@ export default function RegisterPage() {
 
             <Button
               type="submit"
-              className="w-full mt-2 font-medium"
+              className="w-full mt-2 font-medium shadow-xs"
               disabled={isSubmitting}
             >
               {isSubmitting ? (
@@ -264,12 +264,12 @@ export default function RegisterPage() {
           </form>
         </CardContent>
 
-        <CardFooter className="flex flex-col space-y-3 pt-2 text-center text-xs text-muted-foreground border-t">
+        <CardFooter className="flex flex-col space-y-3 pt-2 text-center text-xs text-muted-foreground border-t border-border/70">
           <p>
             Already have an account?{" "}
             <Link
               href="/login"
-              className="font-semibold text-blue-600 hover:text-blue-500 hover:underline dark:text-blue-400"
+              className="font-medium text-primary hover:underline"
             >
               Sign in
             </Link>

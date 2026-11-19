@@ -15,7 +15,9 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import {
   schedulingApi,
@@ -171,78 +173,71 @@ export default function AvailabilityPage() {
   const todayStr = new Date().toISOString().split("T")[0];
 
   return (
-    <AppShell
-      title="Recruiter Availability"
-      actions={
-        <Button
-          onClick={() => updateMutation.mutate()}
-          disabled={updateMutation.isPending || isLoading}
-          className="bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-2 shadow-lg shadow-blue-500/20"
-        >
-          {updateMutation.isPending ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
-          ) : (
-            <Save className="w-4 h-4" />
-          )}
-          Save Availability
-        </Button>
-      }
-    >
-      <div className="max-w-5xl mx-auto space-y-8 pb-16">
-        {/* Header Intro Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-xl">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
-            <div>
-              <div className="flex items-center gap-2.5 mb-2">
-                <span className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center">
-                  <Calendar className="w-4 h-4" />
-                </span>
-                <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">
-                  Scheduling Engine
-                </span>
-              </div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">
-                Recruiter Working Hours & Scheduling Rules
-              </h1>
-              <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-                Set your weekly working windows, interview slot duration, buffer, and blocked dates.
-                Candidate booking links automatically calculate free slots by subtracting Google
-                Calendar FreeBusy and existing interviews.
-              </p>
+    <AppShell title="Recruiter Availability">
+      <div className="max-w-5xl mx-auto space-y-6 pb-16">
+        <PageHeader
+          title="Recruiter Working Hours & Scheduling Rules"
+          description="Configure your weekly availability windows, slot lengths, buffer margins, and holiday blockouts. Booking links evaluate these rules alongside Google Calendar FreeBusy."
+          badge={
+            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+              <Clock className="h-3 w-3 text-primary" />
+              <span>{timezone}</span>
+            </Badge>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                className="gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Reload</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => updateMutation.mutate()}
+                disabled={updateMutation.isPending || isLoading}
+                className="gap-1.5 font-medium shadow-xs"
+              >
+                {updateMutation.isPending ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>Save Availability</span>
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refetch()}
-              className="border-slate-700 bg-slate-800/80 text-slate-300 hover:text-white"
-            >
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-              Reload Preferences
-            </Button>
-          </div>
-        </div>
+          }
+        />
 
         {/* Global Parameters */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <Globe className="w-4 h-4 text-blue-400" />
-            General Parameters & Timezone
-          </h2>
+        <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-5 sm:p-6 shadow-xs space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+              <Globe className="w-4 h-4 text-primary" />
+              General Parameters & Timezone
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              Applied globally across all candidate booking links
+            </span>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <div>
               <label
                 htmlFor="avail-timezone-input"
-                className="text-xs font-semibold text-slate-300 block mb-2 flex items-center gap-1.5"
+                className="text-xs font-medium text-foreground block mb-1.5 flex items-center gap-1.5"
               >
-                <Globe className="w-3.5 h-3.5 text-blue-400" />
+                <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                 Recruiter Timezone
               </label>
               <select
                 id="avail-timezone-input"
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {TIMEZONES.map((tz) => (
                   <option key={tz} value={tz}>
@@ -250,7 +245,7 @@ export default function AvailabilityPage() {
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-slate-500 mt-1.5">
+              <p className="text-[11px] text-muted-foreground mt-1.5">
                 Working hours are evaluated in this timezone (default Asia/Karachi).
               </p>
             </div>
@@ -258,16 +253,16 @@ export default function AvailabilityPage() {
             <div>
               <label
                 htmlFor="avail-slot-duration-input"
-                className="text-xs font-semibold text-slate-300 block mb-2 flex items-center gap-1.5"
+                className="text-xs font-medium text-foreground block mb-1.5 flex items-center gap-1.5"
               >
-                <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                 Slot Duration
               </label>
               <select
                 id="avail-slot-duration-input"
                 value={slotDuration}
                 onChange={(e) => setSlotDuration(Number(e.target.value))}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value={15}>15 minutes</option>
                 <option value={30}>30 minutes (Standard)</option>
@@ -275,7 +270,7 @@ export default function AvailabilityPage() {
                 <option value={60}>60 minutes</option>
                 <option value={90}>90 minutes</option>
               </select>
-              <p className="text-xs text-slate-500 mt-1.5">
+              <p className="text-[11px] text-muted-foreground mt-1.5">
                 Default interview length offered to candidates.
               </p>
             </div>
@@ -283,16 +278,16 @@ export default function AvailabilityPage() {
             <div>
               <label
                 htmlFor="avail-buffer-minutes-input"
-                className="text-xs font-semibold text-slate-300 block mb-2 flex items-center gap-1.5"
+                className="text-xs font-medium text-foreground block mb-1.5 flex items-center gap-1.5"
               >
-                <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                 Buffer Between Slots
               </label>
               <select
                 id="avail-buffer-minutes-input"
                 value={bufferMinutes}
                 onChange={(e) => setBufferMinutes(Number(e.target.value))}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value={0}>0 minutes (Back to back)</option>
                 <option value={5}>5 minutes</option>
@@ -300,7 +295,7 @@ export default function AvailabilityPage() {
                 <option value={15}>15 minutes</option>
                 <option value={30}>30 minutes</option>
               </select>
-              <p className="text-xs text-slate-500 mt-1.5">
+              <p className="text-[11px] text-muted-foreground mt-1.5">
                 Break time enforced before and after each booked interview.
               </p>
             </div>
@@ -308,18 +303,18 @@ export default function AvailabilityPage() {
         </div>
 
         {/* Weekly Hours Grid */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+        <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Clock className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+              <Clock className="w-4 h-4 text-primary" />
               Weekly Working Hours
             </h2>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-muted-foreground">
               Slots are only computed during enabled windows
             </span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             {DAYS.map((d) => {
               const dayState = weeklyConfig[d.key] || {
                 enabled: false,
@@ -329,10 +324,10 @@ export default function AvailabilityPage() {
               return (
                 <div
                   key={d.key}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl border transition gap-3 ${
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-lg border transition gap-3 ${
                     dayState.enabled
-                      ? "bg-slate-800/80 border-slate-700/80"
-                      : "bg-slate-950/40 border-slate-800/60 opacity-60"
+                      ? "bg-muted/30 border-border/70"
+                      : "bg-muted/5 border-border/30 opacity-60"
                   }`}
                 >
                   <div className="flex items-center gap-3 w-44">
@@ -346,18 +341,18 @@ export default function AvailabilityPage() {
                           [d.key]: { ...prev[d.key], enabled: e.target.checked },
                         }))
                       }
-                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 bg-slate-800 border-slate-700 cursor-pointer"
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                     />
                     <label
                       htmlFor={`day-toggle-${d.key}`}
-                      className="text-sm font-semibold text-white cursor-pointer select-none"
+                      className="text-xs font-semibold text-foreground cursor-pointer select-none"
                     >
                       {d.label}
                     </label>
                   </div>
 
                   {dayState.enabled ? (
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                       <input
                         id={`day-start-${d.key}`}
                         type="time"
@@ -368,9 +363,9 @@ export default function AvailabilityPage() {
                             [d.key]: { ...prev[d.key], start: e.target.value },
                           }))
                         }
-                        className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="bg-background border border-input rounded-md px-2.5 py-1 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       />
-                      <span className="text-slate-400 text-xs font-medium">to</span>
+                      <span className="text-muted-foreground text-xs font-medium">to</span>
                       <input
                         id={`day-end-${d.key}`}
                         type="time"
@@ -381,11 +376,11 @@ export default function AvailabilityPage() {
                             [d.key]: { ...prev[d.key], end: e.target.value },
                           }))
                         }
-                        className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="bg-background border border-input rounded-md px-2.5 py-1 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       />
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-500 italic pr-2">Unavailable</span>
+                    <span className="text-xs text-muted-foreground italic pr-2">Unavailable</span>
                   )}
                 </div>
               );
@@ -394,21 +389,21 @@ export default function AvailabilityPage() {
         </div>
 
         {/* Blocked Dates Manager */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+        <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-amber-500" />
                 Blocked Dates & Holidays
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 On these specific calendar dates, no candidate slots will be generated regardless
                 of weekly hours.
               </p>
             </div>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 w-fit">
+            <Badge variant="warning" className="text-xs w-fit">
               {blockedDates.length} Date{blockedDates.length === 1 ? "" : "s"} Blocked
-            </span>
+            </Badge>
           </div>
 
           {/* Add Date Input */}
@@ -419,7 +414,7 @@ export default function AvailabilityPage() {
               min={todayStr}
               value={newBlockedDate}
               onChange={(e) => setNewBlockedDate(e.target.value)}
-              className="w-full sm:w-64 bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full sm:w-64 bg-background border border-input rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <Button
               id="btn-add-blocked-date"
@@ -427,32 +422,32 @@ export default function AvailabilityPage() {
               size="sm"
               onClick={handleAddBlockedDate}
               disabled={!newBlockedDate}
-              className="w-full sm:w-auto border-slate-700 bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-1.5"
+              className="w-full sm:w-auto gap-1.5"
             >
-              <Plus className="w-4 h-4 text-blue-400" />
-              Add Blocked Date
+              <Plus className="w-4 h-4 text-primary" />
+              <span>Add Blocked Date</span>
             </Button>
           </div>
 
           {/* Blocked Dates Chips */}
           {blockedDates.length === 0 ? (
-            <div className="p-6 rounded-2xl border border-dashed border-slate-800 text-center">
-              <p className="text-xs text-slate-500">
+            <div className="p-6 rounded-xl border border-dashed border-border/70 text-center">
+              <p className="text-xs text-muted-foreground">
                 No dates blocked. Select a date above to block holidays or out-of-office days.
               </p>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2.5 pt-2">
+            <div className="flex flex-wrap gap-2 pt-1">
               {blockedDates.map((dateStr) => (
                 <div
                   key={dateStr}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs font-mono text-slate-200 shadow-sm"
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/50 border border-border/70 text-xs font-mono text-foreground shadow-xs"
                 >
-                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  <Calendar className="w-3.5 h-3.5 text-amber-500" />
                   <span>{dateStr}</span>
                   <button
                     onClick={() => handleRemoveBlockedDate(dateStr)}
-                    className="text-slate-400 hover:text-red-400 transition ml-1 p-0.5 rounded"
+                    className="text-muted-foreground hover:text-destructive transition ml-1 p-0.5 rounded"
                     title={`Remove ${dateStr}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -463,23 +458,23 @@ export default function AvailabilityPage() {
           )}
         </div>
 
-        {/* Floating / Bottom Save Bar */}
-        <div className="flex items-center justify-between pt-4">
-          <p className="text-xs text-slate-500">
-            Changes will take effect immediately for all active candidate scheduling links.
+        {/* Bottom Save Bar */}
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-muted-foreground">
+            Changes take effect immediately for all active candidate scheduling links.
           </p>
           <Button
             id="btn-save-availability"
             onClick={() => updateMutation.mutate()}
             disabled={updateMutation.isPending || isLoading}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-2 px-6 py-2.5 shadow-lg shadow-blue-500/20"
+            className="font-medium gap-2 px-5 shadow-xs"
           >
             {updateMutation.isPending ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : (
               <Save className="w-4 h-4" />
             )}
-            Save Availability
+            <span>Save Availability</span>
           </Button>
         </div>
       </div>

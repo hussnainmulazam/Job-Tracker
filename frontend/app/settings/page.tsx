@@ -47,6 +47,7 @@ import {
 } from "@/lib/api";
 import { useTheme } from "@/components/theme-provider";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -309,9 +310,20 @@ export default function SettingsPage() {
 
   return (
     <AppShell title="Settings & Infrastructure">
-      <div className="space-y-6 max-w-4xl pb-12">
+      <div className="space-y-6 max-w-4xl pb-16">
+        <PageHeader
+          title="Settings & System Infrastructure"
+          description="Manage Google Workspace integrations, resume ingestion filters, AI inference chains, and database connection latency."
+          badge={
+            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+              <Shield className="h-3 w-3 text-primary" />
+              <span>System Health</span>
+            </Badge>
+          }
+        />
+
         {/* 1. User Profile Card */}
-        <Card className="border border-border shadow-xs">
+        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
               <UserIcon className="h-4 w-4 text-primary" />
@@ -328,12 +340,12 @@ export default function SettingsPage() {
                 <Skeleton className="h-4 w-72" />
               </div>
             ) : user ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="p-3 rounded-lg border bg-muted/20 space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-lg border border-border/70 bg-muted/30 space-y-1">
                   <span className="text-[11px] text-muted-foreground font-medium">Email Address</span>
                   <p className="font-semibold text-foreground truncate">{user.email}</p>
                 </div>
-                <div className="p-3 rounded-lg border bg-muted/20 space-y-1">
+                <div className="p-3 rounded-lg border border-border/70 bg-muted/30 space-y-1">
                   <span className="text-[11px] text-muted-foreground font-medium">User Identifier (UUID)</span>
                   <p className="font-mono text-[11px] text-foreground truncate">{user.id}</p>
                 </div>
@@ -345,7 +357,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* 2. Google Workspace & Gmail Sync Integration */}
-        <Card className="border border-border shadow-xs">
+        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
           <CardHeader className="flex flex-row items-start justify-between pb-3">
             <div className="space-y-0.5">
               <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
@@ -776,7 +788,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* 3. Theme Preferences */}
-        <Card className="border border-border shadow-xs">
+        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
               <Sun className="h-4 w-4 text-amber-500" />
@@ -787,12 +799,12 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-3 gap-3 max-w-md">
+            <div className="grid grid-cols-3 gap-2.5 max-w-md">
               <Button
                 variant={theme === "light" ? "default" : "outline"}
                 size="sm"
                 onClick={() => setTheme("light")}
-                className="text-xs h-9 gap-2"
+                className="text-xs h-8 gap-2 font-medium"
               >
                 <Sun className="h-3.5 w-3.5" />
                 <span>Light</span>
@@ -801,7 +813,7 @@ export default function SettingsPage() {
                 variant={theme === "dark" ? "default" : "outline"}
                 size="sm"
                 onClick={() => setTheme("dark")}
-                className="text-xs h-9 gap-2"
+                className="text-xs h-8 gap-2 font-medium"
               >
                 <Moon className="h-3.5 w-3.5" />
                 <span>Dark</span>
@@ -810,7 +822,7 @@ export default function SettingsPage() {
                 variant={theme === "system" ? "default" : "outline"}
                 size="sm"
                 onClick={() => setTheme("system")}
-                className="text-xs h-9 gap-2"
+                className="text-xs h-8 gap-2 font-medium"
               >
                 <Monitor className="h-3.5 w-3.5" />
                 <span>System</span>
@@ -820,7 +832,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* 4. AI Models Health Monitor */}
-        <Card className="border border-border shadow-xs">
+        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div className="space-y-0.5">
               <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
@@ -853,10 +865,10 @@ export default function SettingsPage() {
             ) : !aiHealth?.models ? (
               <p className="text-xs text-muted-foreground">Model status unavailable.</p>
             ) : (
-              <div className="border rounded-lg overflow-x-auto">
+              <div className="border border-border/70 dark:border-white/[0.08] rounded-xl overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b bg-muted/40 text-muted-foreground font-semibold">
+                    <tr className="border-b border-border/70 bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
                       <th className="py-2.5 px-3">Model</th>
                       <th className="py-2.5 px-3">Chain / Task</th>
                       <th className="py-2.5 px-3">Status</th>
@@ -869,7 +881,7 @@ export default function SettingsPage() {
                       ? aiHealth.models
                       : (Object.values(aiHealth.models) as ModelHealthItem[])
                     ).map((m: ModelHealthItem) => (
-                      <tr key={m.model} className="hover:bg-muted/20">
+                      <tr key={m.model} className="hover:bg-muted/30 transition">
                         <td className="py-2.5 px-3 font-mono font-medium text-foreground">
                           {m.model}
                         </td>
@@ -916,7 +928,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* 5. Infrastructure Health */}
-        <Card className="border border-border shadow-xs">
+        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">

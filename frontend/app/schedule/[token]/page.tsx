@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   schedulingApi,
@@ -171,10 +172,10 @@ export default function CandidateSchedulingPage({
 
   if (isInfoLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
         <div className="flex flex-col items-center gap-3">
-          <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-          <p className="text-sm text-slate-400">Loading interview details...</p>
+          <RefreshCw className="w-6 h-6 text-primary animate-spin" />
+          <p className="text-xs text-muted-foreground">Loading interview details...</p>
         </div>
       </div>
     );
@@ -182,11 +183,11 @@ export default function CandidateSchedulingPage({
 
   if (isInfoError || !pageInfo) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center">
-          <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold mb-2">Invalid or Expired Link</h2>
-          <p className="text-sm text-slate-400 mb-6">
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border border-border/70 dark:border-white/[0.08] rounded-2xl p-8 text-center shadow-card">
+          <AlertCircle className="w-10 h-10 text-destructive mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-foreground mb-1">Invalid or Expired Link</h2>
+          <p className="text-xs text-muted-foreground mb-6">
             This scheduling invitation link is invalid or has expired. Please contact the hiring team
             for an updated link.
           </p>
@@ -198,20 +199,20 @@ export default function CandidateSchedulingPage({
   // Handle Expired State
   if (pageInfo.status === "expired" && !bookedInterview) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 border border-amber-500/30 rounded-2xl p-8 text-center">
-          <Clock className="w-12 h-12 text-amber-400 mx-auto mb-4" />
-          <h2 className="text-xl font-bold mb-2">Scheduling Link Expired</h2>
-          <p className="text-sm text-slate-400 mb-6">
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border border-amber-500/30 rounded-2xl p-8 text-center shadow-card">
+          <Clock className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-foreground mb-1">Scheduling Link Expired</h2>
+          <p className="text-xs text-muted-foreground mb-6">
             This invitation to interview for{" "}
-            <span className="text-white font-medium">{pageInfo.opening_title}</span> expired on{" "}
+            <span className="text-foreground font-medium">{pageInfo.opening_title}</span> expired on{" "}
             {new Date(pageInfo.expires_at).toLocaleDateString()}.
           </p>
           <a
             href={`mailto:${pageInfo.interviewer_email}?subject=Interview Scheduling Link Expired - ${pageInfo.candidate_name}`}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium text-xs shadow-xs transition"
           >
-            <Mail className="w-4 h-4" />
+            <Mail className="w-3.5 h-3.5" />
             Contact Recruiter
           </a>
         </div>
@@ -254,56 +255,56 @@ export default function CandidateSchedulingPage({
     });
 
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="max-w-xl w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"
+          className="max-w-xl w-full bg-card border border-border/70 dark:border-white/[0.08] rounded-2xl p-8 shadow-card"
         >
           <div className="flex flex-col items-center text-center">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-4 ring-8 ring-emerald-500/10">
-              <CheckCircle2 className="w-10 h-10" />
+            <div className="w-14 h-14 rounded-full bg-emerald-500/15 text-emerald-500 flex items-center justify-center mb-3 ring-4 ring-emerald-500/10">
+              <CheckCircle2 className="w-8 h-8" />
             </div>
-            <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-3">
+            <Badge variant="success" className="text-xs mb-3">
               Interview Confirmed
-            </span>
-            <h1 className="text-2xl font-bold text-white mb-1">You're Scheduled!</h1>
-            <p className="text-sm text-slate-400 mb-6">
-              Hi <strong className="text-slate-200">{bookedInterview.candidate_name}</strong>, your interview for{" "}
-              <strong className="text-slate-200">{bookedInterview.opening_title}</strong> is locked in.
+            </Badge>
+            <h1 className="text-xl font-bold tracking-tight text-foreground mb-1">You&apos;re Scheduled!</h1>
+            <p className="text-xs text-muted-foreground mb-6">
+              Hi <strong className="text-foreground">{bookedInterview.candidate_name}</strong>, your interview for{" "}
+              <strong className="text-foreground">{bookedInterview.opening_title}</strong> is locked in.
             </p>
 
             {/* Time card */}
-            <div className="w-full bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 text-left mb-6 space-y-4">
+            <div className="w-full bg-muted/30 border border-border/70 rounded-xl p-5 text-left mb-6 space-y-3.5">
               <div className="flex items-start gap-3">
-                <CalendarIcon className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
+                <CalendarIcon className="w-4 h-4 text-primary mt-0.5 shrink-0" />
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold text-slate-400">Date</div>
-                  <div className="text-base font-semibold text-white">{dateFormatted}</div>
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Date</div>
+                  <div className="text-sm font-semibold text-foreground">{dateFormatted}</div>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <Clock className="w-5 h-5 text-indigo-400 mt-0.5 shrink-0" />
+                <Clock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold text-slate-400">Time</div>
-                  <div className="text-base font-semibold text-white">
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Time</div>
+                  <div className="text-sm font-semibold text-foreground">
                     {timeFormatted} – {endTimeFormatted}{" "}
-                    <span className="text-xs text-slate-400">({bookedInterview.timezone})</span>
+                    <span className="text-xs text-muted-foreground font-normal">({bookedInterview.timezone})</span>
                   </div>
                 </div>
               </div>
 
               {bookedInterview.meet_link && (
-                <div className="flex items-start gap-3 pt-2 border-t border-slate-700/50">
-                  <Video className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+                <div className="flex items-start gap-3 pt-3 border-t border-border/70">
+                  <Video className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
                   <div className="flex-1">
-                    <div className="text-xs uppercase tracking-wider font-semibold text-slate-400">Google Meet</div>
+                    <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Google Meet</div>
                     <a
                       href={bookedInterview.meet_link}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-emerald-400 hover:text-emerald-300 font-medium inline-flex items-center gap-1.5 break-all mt-0.5"
+                      className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1.5 break-all mt-0.5"
                     >
                       {bookedInterview.meet_link}
                       <ExternalLink className="w-3.5 h-3.5 shrink-0" />
@@ -314,16 +315,16 @@ export default function CandidateSchedulingPage({
             </div>
 
             {/* Action buttons */}
-            <div className="w-full space-y-3 mb-6">
+            <div className="w-full space-y-2.5 mb-6">
               {bookedInterview.meet_link && (
                 <a
                   href={bookedInterview.meet_link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition shadow-lg shadow-emerald-600/20"
+                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition shadow-xs"
                 >
                   <Video className="w-4 h-4" />
-                  Join Google Meet
+                  <span>Join Google Meet</span>
                 </a>
               )}
 
@@ -331,17 +332,17 @@ export default function CandidateSchedulingPage({
                 href={getGoogleCalendarUrl(bookedInterview)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm transition border border-slate-700"
+                className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-muted/60 hover:bg-muted text-foreground font-medium text-xs transition border border-border/70 shadow-xs"
               >
-                <CalendarIcon className="w-4 h-4 text-blue-400" />
-                Add to Google Calendar
+                <CalendarIcon className="w-4 h-4 text-primary" />
+                <span>Add to Google Calendar</span>
               </a>
             </div>
 
             {/* Notification alert */}
-            <div className="text-xs text-slate-400 bg-slate-950/60 p-3 rounded-xl border border-slate-800 w-full mb-6">
-              A calendar invite and automated reminders (24 hours and 1 hour before) will be sent to{" "}
-              <span className="text-slate-300 font-medium">{bookedInterview.candidate_email}</span> and via WhatsApp.
+            <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg border border-border/70 w-full mb-6">
+              A calendar invite has been sent to{" "}
+              <span className="text-foreground font-medium">{bookedInterview.candidate_email}</span>.
             </div>
 
             {/* Reschedule / Cancel actions */}
@@ -351,15 +352,15 @@ export default function CandidateSchedulingPage({
                   setIsRescheduling(true);
                   refetchSlots();
                 }}
-                className="text-slate-400 hover:text-white underline underline-offset-4 transition"
+                className="text-muted-foreground hover:text-foreground underline underline-offset-4 transition"
               >
                 Reschedule interview
               </button>
-              <span className="text-slate-600">•</span>
+              <span className="text-muted-foreground/40">•</span>
               <button
                 id="btn-trigger-cancel-interview"
                 onClick={() => setShowCancelModal(true)}
-                className="text-rose-400 hover:text-rose-300 underline underline-offset-4 transition"
+                className="text-destructive hover:underline underline-offset-4 transition"
               >
                 Cancel interview
               </button>
@@ -369,11 +370,11 @@ export default function CandidateSchedulingPage({
 
         {/* Cancellation Modal */}
         {showCancelModal && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-              <h3 className="text-lg font-bold text-white mb-2">Cancel Interview</h3>
-              <p className="text-xs text-slate-400 mb-4">
-                Are you sure you want to cancel this interview? Your Google Calendar event will be deleted
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="max-w-md w-full bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-6 shadow-card">
+              <h3 className="text-sm font-semibold text-foreground mb-1">Cancel Interview</h3>
+              <p className="text-xs text-muted-foreground mb-4">
+                Are you sure you want to cancel this interview? The calendar event will be deleted
                 and the recruiter will be notified.
               </p>
               <textarea
@@ -381,9 +382,9 @@ export default function CandidateSchedulingPage({
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 rows={3}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder-slate-500 mb-4 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                className="w-full bg-background border border-input rounded-lg p-2.5 text-xs text-foreground placeholder:text-muted-foreground mb-4 focus:outline-none focus:ring-1 focus:ring-ring"
               />
-              <div className="flex justify-end gap-3">
+              <div className="flex justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setShowCancelModal(false)}>
                   Keep Interview
                 </Button>
@@ -407,16 +408,16 @@ export default function CandidateSchedulingPage({
   // ── Render Cancelled State ──────────────────────────────────────────────────
   if (bookedInterview?.status === "cancelled") {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 border border-rose-500/30 rounded-2xl p-8 text-center">
-          <XCircle className="w-12 h-12 text-rose-400 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white mb-2">Interview Cancelled</h2>
-          <p className="text-sm text-slate-400 mb-4">
-            This interview session for <span className="text-white">{pageInfo.opening_title}</span> has been cancelled.
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border border-destructive/20 rounded-2xl p-8 text-center shadow-card">
+          <XCircle className="w-10 h-10 text-destructive mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-foreground mb-1">Interview Cancelled</h2>
+          <p className="text-xs text-muted-foreground mb-4">
+            This interview session for <span className="text-foreground">{pageInfo.opening_title}</span> has been cancelled.
           </p>
           {bookedInterview.cancellation_reason && (
-            <p className="text-xs bg-slate-950 p-3 rounded-lg text-slate-400 italic mb-6">
-              "{bookedInterview.cancellation_reason}"
+            <p className="text-xs bg-muted/40 p-3 rounded-lg text-muted-foreground italic mb-6">
+              &quot;{bookedInterview.cancellation_reason}&quot;
             </p>
           )}
           <Button
@@ -441,41 +442,39 @@ export default function CandidateSchedulingPage({
   const currentSlots = selectedDate ? slotsByDate[selectedDate] || [] : [];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-background text-foreground py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         {/* Header Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 mb-8 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-
+        <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-2xl p-6 sm:p-8 mb-6 shadow-card relative overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <Badge variant="primary" className="text-xs">
                   {pageInfo.opening_title}
-                </span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-slate-400" />
-                  {pageInfo.slot_duration_minutes} mins
-                </span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center gap-1 border border-emerald-500/20">
+                </Badge>
+                <Badge variant="outline" className="text-xs gap-1">
+                  <Clock className="w-3 h-3 text-muted-foreground" />
+                  <span>{pageInfo.slot_duration_minutes} mins</span>
+                </Badge>
+                <Badge variant="success" className="text-xs gap-1">
                   <Video className="w-3 h-3" />
-                  Google Meet
-                </span>
+                  <span>Google Meet</span>
+                </Badge>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-bold text-foreground tracking-tight">
                 {isRescheduling ? "Reschedule Interview" : `Hi ${pageInfo.candidate_name}, Select a Time`}
               </h1>
-              <p className="text-sm text-slate-400 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 Choose a time that works best for your upcoming screening interview with{" "}
-                <span className="text-slate-200">{pageInfo.interviewer_email}</span>.
+                <span className="text-foreground font-medium">{pageInfo.interviewer_email}</span>.
               </p>
             </div>
 
             {/* Timezone picker */}
             <div className="shrink-0 flex flex-col items-start md:items-end">
-              <label className="text-xs font-medium text-slate-400 flex items-center gap-1.5 mb-1.5">
-                <Globe className="w-3.5 h-3.5 text-blue-400" />
-                Your Timezone
+              <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                <Globe className="w-3.5 h-3.5 text-primary" />
+                <span>Your Timezone</span>
               </label>
               <select
                 value={selectedTz}
@@ -483,7 +482,7 @@ export default function CandidateSchedulingPage({
                   setSelectedTz(e.target.value);
                   setSelectedSlot(null);
                 }}
-                className="bg-slate-800 text-white text-xs border border-slate-700 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                className="bg-background text-foreground text-xs border border-input rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring font-medium"
               >
                 {TIMEZONES.map((tz) => (
                   <option key={tz} value={tz}>
@@ -497,31 +496,31 @@ export default function CandidateSchedulingPage({
 
         {/* Error banner */}
         {errorMessage && (
-          <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
+          <div className="mb-6 p-3.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0" />
             <p className="flex-1">{errorMessage}</p>
-            <button onClick={() => setErrorMessage(null)} className="text-xs underline text-rose-200">
+            <button onClick={() => setErrorMessage(null)} className="text-xs underline">
               Dismiss
             </button>
           </div>
         )}
 
         {/* Main Slot Picker Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left: Date Carousel & Day List */}
-          <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl h-fit">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-blue-400" />
-              Available Dates
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left: Day List */}
+          <div className="lg:col-span-5 bg-card border border-border/70 dark:border-white/[0.08] rounded-2xl p-5 shadow-card h-fit">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
+              <CalendarIcon className="w-4 h-4 text-primary" />
+              <span>Available Dates</span>
             </h2>
 
             {isSlotsLoading ? (
-              <div className="py-12 flex flex-col items-center justify-center text-slate-500 text-xs gap-2">
-                <RefreshCw className="w-6 h-6 animate-spin text-blue-500" />
+              <div className="py-12 flex flex-col items-center justify-center text-muted-foreground text-xs gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin text-primary" />
                 <span>Checking recruiter calendar...</span>
               </div>
             ) : availableDates.length === 0 ? (
-              <div className="py-12 text-center text-slate-500 text-sm">
+              <div className="py-12 text-center text-muted-foreground text-xs">
                 No slots available in this date range. Please contact HR.
               </div>
             ) : (
@@ -541,19 +540,19 @@ export default function CandidateSchedulingPage({
                         setSelectedDate(dateStr);
                         setSelectedSlot(null);
                       }}
-                      className={`w-full flex items-center justify-between p-3.5 rounded-2xl transition border text-left ${
+                      className={`w-full flex items-center justify-between p-3 rounded-xl transition border text-left cursor-pointer ${
                         isSelected
-                          ? "bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/30 font-semibold"
-                          : "bg-slate-800/60 hover:bg-slate-800 text-slate-200 border-slate-700/60 hover:border-slate-600"
+                          ? "bg-primary text-primary-foreground border-primary shadow-xs font-semibold"
+                          : "bg-muted/40 hover:bg-muted text-foreground border-border/70"
                       }`}
                     >
                       <div>
-                        <div className="text-xs uppercase tracking-wider opacity-80">{dayName}</div>
-                        <div className="text-sm font-bold">{monthDay}</div>
+                        <div className="text-[10px] uppercase tracking-wider opacity-80">{dayName}</div>
+                        <div className="text-xs font-semibold">{monthDay}</div>
                       </div>
                       <span
-                        className={`text-xs px-2.5 py-1 rounded-full ${
-                          isSelected ? "bg-white/20 text-white" : "bg-slate-900 text-slate-400"
+                        className={`text-[11px] px-2 py-0.5 rounded-full ${
+                          isSelected ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
                         }`}
                       >
                         {slotCount} slots
@@ -566,15 +565,15 @@ export default function CandidateSchedulingPage({
           </div>
 
           {/* Right: Slots for selected date & confirmation */}
-          <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col justify-between">
+          <div className="lg:col-span-7 bg-card border border-border/70 dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 shadow-card flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-indigo-400" />
-                  Select a Time Slot
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-border/70">
+                <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-primary" />
+                  <span>Select a Time Slot</span>
                 </h2>
                 {selectedDate && (
-                  <span className="text-xs text-slate-400 font-medium">
+                  <span className="text-xs text-muted-foreground font-medium">
                     {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
                       weekday: "long",
                       month: "short",
@@ -585,21 +584,21 @@ export default function CandidateSchedulingPage({
               </div>
 
               {currentSlots.length === 0 ? (
-                <div className="py-16 text-center text-slate-500 text-sm">
+                <div className="py-16 text-center text-muted-foreground text-xs">
                   Please pick a date on the left to see available times.
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[320px] overflow-y-auto pr-1">
                   {currentSlots.map((slot) => {
                     const isSelected = selectedSlot?.start_time === slot.start_time;
                     return (
                       <button
                         key={slot.start_time}
                         onClick={() => setSelectedSlot(slot)}
-                        className={`py-3 px-2 rounded-xl text-xs font-semibold border transition text-center ${
+                        className={`py-2.5 px-2 rounded-lg text-xs font-medium border transition text-center cursor-pointer ${
                           isSelected
-                            ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
-                            : "bg-slate-800/80 hover:bg-slate-750 text-slate-200 border-slate-700 hover:border-slate-600"
+                            ? "bg-primary text-primary-foreground border-primary shadow-xs font-semibold"
+                            : "bg-muted/40 hover:bg-muted text-foreground border-border/70"
                         }`}
                       >
                         {slot.start_time_local}
@@ -611,8 +610,8 @@ export default function CandidateSchedulingPage({
 
               {/* Optional Candidate Notes */}
               {selectedSlot && (
-                <div className="mt-6 pt-4 border-t border-slate-800">
-                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                <div className="mt-5 pt-4 border-t border-border/70">
+                  <label className="text-xs font-medium text-foreground block mb-1.5">
                     {isRescheduling ? "Reason for Rescheduling" : "Notes or Topics to Discuss (Optional)"}
                   </label>
                   <textarea
@@ -626,34 +625,36 @@ export default function CandidateSchedulingPage({
                         ? "Brief reason for new time..."
                         : "Any questions or portfolio links you'd like to share ahead of time..."
                     }
-                    className="w-full bg-slate-800/90 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full bg-background border border-input rounded-lg p-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
               )}
             </div>
 
             {/* Confirm & Book Button */}
-            <div className="mt-8 pt-4 border-t border-slate-800">
+            <div className="mt-6 pt-4 border-t border-border/70">
               <Button
                 id="btn-confirm-booking"
                 onClick={() => (isRescheduling ? rescheduleMutation.mutate() : bookMutation.mutate())}
                 disabled={!selectedSlot || bookMutation.isPending || rescheduleMutation.isPending}
-                className="w-full h-12 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2"
+                className="w-full h-10 rounded-lg font-medium text-xs shadow-xs transition flex items-center justify-center gap-2"
               >
                 {bookMutation.isPending || rescheduleMutation.isPending ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Confirming with Google Calendar...
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Confirming with Google Calendar...</span>
                   </>
                 ) : selectedSlot ? (
                   <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    {isRescheduling
-                      ? `Confirm Reschedule to ${selectedSlot.start_time_local}`
-                      : `Confirm Interview for ${selectedSlot.start_time_local}`}
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>
+                      {isRescheduling
+                        ? `Confirm Reschedule to ${selectedSlot.start_time_local}`
+                        : `Confirm Interview for ${selectedSlot.start_time_local}`}
+                    </span>
                   </>
                 ) : (
-                  "Select a Time Slot to Continue"
+                  <span>Select a Time Slot to Continue</span>
                 )}
               </Button>
             </div>

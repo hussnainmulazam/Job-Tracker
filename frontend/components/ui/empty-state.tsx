@@ -25,24 +25,24 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div
-      className={`flex flex-col items-center justify-center text-center p-8 sm:p-12 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/40 backdrop-blur-xs ${className}`}
+      className={`flex flex-col items-center justify-center text-center p-8 sm:p-12 rounded-xl border border-dashed border-border/70 bg-card/30 dark:bg-card/15 backdrop-blur-xs ${className}`}
     >
-      <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4 shadow-xs">
-        <Icon className="h-6 w-6 sm:h-7 sm:w-7" />
+      <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-lg bg-muted/70 text-foreground/80 flex items-center justify-center mb-3.5 border border-border/50 shadow-xs">
+        <Icon className="h-5 w-5" />
       </div>
 
-      <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white mb-1.5">
+      <h3 className="text-sm sm:text-base font-semibold tracking-tight text-foreground mb-1">
         {title}
       </h3>
 
-      <p className="text-xs sm:text-sm text-muted-foreground max-w-sm mb-6 leading-relaxed">
+      <p className="text-xs text-muted-foreground max-w-sm mb-5 leading-relaxed">
         {description}
       </p>
 
       {(actionText || secondaryActionText) && (
-        <div className="flex flex-wrap items-center justify-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-2">
           {actionText && onAction && (
-            <Button size="sm" onClick={onAction} className="font-semibold shadow-xs">
+            <Button size="sm" onClick={onAction} className="font-medium shadow-xs">
               {actionText}
             </Button>
           )}

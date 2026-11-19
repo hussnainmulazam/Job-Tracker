@@ -39,22 +39,22 @@ export function KanbanColumn({
     <div
       ref={setNodeRef}
       data-column-id={column.id}
-      className={`flex flex-col h-full rounded-2xl border transition-colors duration-150 bg-card/40 ${
+      className={`flex flex-col h-full rounded-xl border transition-colors duration-150 bg-card/40 ${
         isOver
-          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-          : "border-border"
+          ? "border-primary bg-primary/5 ring-1.5 ring-primary/20"
+          : "border-border/70 dark:border-white/[0.08]"
       }`}
     >
       {/* Column Header */}
       <div
-        className={`p-3.5 border-b rounded-t-2xl flex items-center justify-between ${column.headerBg} border-border`}
+        className={`p-3 border-b rounded-t-xl flex items-center justify-between ${column.headerBg} border-border/70 dark:border-white/[0.08]`}
       >
         <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${column.dotColor}`} />
-          <h3 className="font-bold text-xs text-foreground uppercase tracking-wider">
+          <span className={`h-2 w-2 rounded-full ${column.dotColor}`} />
+          <h3 className="font-semibold text-xs text-foreground uppercase tracking-wider">
             {column.title}
           </h3>
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-background/80 text-foreground border border-border">
+          <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-background/80 text-foreground border border-border/60">
             {candidates.length}
           </span>
         </div>

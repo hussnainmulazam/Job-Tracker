@@ -26,6 +26,7 @@ import {
   BulkScoreResponse,
 } from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -158,60 +159,70 @@ export default function JobOpeningsPage() {
   };
 
   return (
-    <AppShell
-      title="Job Requisitions"
-      actions={
-        <Button
-          size="sm"
-          onClick={() => setCreateDialogOpen(true)}
-          className="h-8 gap-1.5 text-xs font-semibold shadow-xs"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span>New Requisition</span>
-        </Button>
-      }
-    >
+    <AppShell title="Job Requisitions">
       <div className="space-y-6 pb-8">
-        {/* Filter & Search Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Search requisitions or skills..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 text-xs h-8 bg-card"
-              />
+        <PageHeader
+          title="Job Requisitions"
+          description="Define hiring criteria, monitor candidate pipelines per role, run AI scoring, and manage Google Sheets sync."
+          badge={
+            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+              <Briefcase className="h-3 w-3 text-primary" />
+              <span>{openings.length} Requisitions</span>
+            </Badge>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                className="gap-1.5"
+              >
+                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>Refresh</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setCreateDialogOpen(true)}
+                className="gap-1.5 font-medium shadow-xs"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>New Requisition</span>
+              </Button>
             </div>
+          }
+        >
+          {/* Filter & Search Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Filter requisitions or required skills..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 text-xs h-8 bg-card"
+                />
+              </div>
 
-            <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-lg border border-border">
-              {["all", "active", "draft", "paused", "closed"].map((st) => (
-                <button
-                  key={st}
-                  onClick={() => setStatusFilter(st)}
-                  className={`text-xs capitalize font-medium px-2.5 py-1 rounded-md transition-colors ${
-                    statusFilter === st
-                      ? "bg-background text-foreground shadow-2xs font-semibold"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {st}
-                </button>
-              ))}
+              <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-lg border border-border/70">
+                {["all", "active", "draft", "paused", "closed"].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    className={`text-xs capitalize font-medium px-2.5 py-1 rounded-md transition-all ${
+                      statusFilter === st
+                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            className="text-xs h-8 gap-1.5"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
-        </div>
+        </PageHeader>
 
         {/* Content Body */}
         {isLoading ? (
@@ -248,7 +259,7 @@ export default function JobOpeningsPage() {
             {filteredOpenings.map((op) => (
               <Card
                 key={op.id}
-                className="border border-border bg-card shadow-2xs hover:shadow-sm transition-shadow flex flex-col justify-between"
+                className="border border-border/70 dark:border-white/[0.08] bg-card shadow-xs hover:shadow-card-hover transition-all flex flex-col justify-between"
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-3">

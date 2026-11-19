@@ -67,14 +67,14 @@ export function KanbanCard({
           onClick(candidate);
         }
       }}
-      className={`group relative select-none rounded-xl border bg-card p-3.5 shadow-2xs transition-all duration-150 hover:shadow-md hover:border-primary/50 cursor-grab active:cursor-grabbing ${
+      className={`group relative select-none rounded-lg border bg-card p-3 shadow-xs transition-all duration-150 hover:shadow-card-hover hover:border-border cursor-grab active:cursor-grabbing ${
         isDragging
           ? "opacity-30 border-dashed border-primary"
           : isOverlay
-          ? "shadow-2xl border-primary scale-105 rotate-1 z-50 ring-2 ring-primary/40 bg-card"
+          ? "shadow-dropdown border-primary scale-105 rotate-1 z-50 ring-1.5 ring-primary/40 bg-card"
           : isSelected
           ? "border-primary bg-primary/5 ring-1 ring-primary/40"
-          : "border-border"
+          : "border-border/70 dark:border-white/[0.08]"
       }`}
     >
       {/* Selection checkbox */}

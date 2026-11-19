@@ -22,7 +22,12 @@ import {
   Phone,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
 import {
   schedulingApi,
   jobOpeningsApi,
@@ -80,136 +85,144 @@ export default function InterviewsPage() {
     switch (status) {
       case "scheduled":
         return (
-          <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <Badge variant="success" className="gap-1 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             Scheduled
-          </span>
+          </Badge>
         );
       case "rescheduled":
         return (
-          <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+          <Badge variant="info" className="gap-1 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
             Rescheduled
-          </span>
+          </Badge>
         );
       case "cancelled":
         return (
-          <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+          <Badge variant="destructive" className="gap-1 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
             Cancelled
-          </span>
+          </Badge>
         );
       case "completed":
         return (
-          <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-500/10 text-slate-300 border border-slate-500/20">
+          <Badge variant="secondary" className="font-medium">
             Completed
-          </span>
+          </Badge>
         );
       default:
         return (
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
+          <Badge variant="outline">
             {status}
-          </span>
+          </Badge>
         );
     }
   };
 
   return (
-    <AppShell
-      title="Interviews & Calendar"
-      actions={
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setAvailabilityOpen(true)}
-            className="gap-1.5 text-xs border-slate-700 bg-slate-900/60 text-slate-200 hover:text-white"
-          >
-            <Settings className="w-3.5 h-3.5 text-blue-400" />
-            Availability Rules
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => refetch()}
-            variant="ghost"
-            className="text-slate-400 hover:text-white p-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </Button>
-        </div>
-      }
-    >
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Controls Bar */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 shadow-sm">
-          {/* Search */}
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search candidate or job opening..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Filters & View Switcher */}
-          <div className="flex items-center gap-3">
-            {/* Opening Filter */}
-            <select
-              value={selectedOpeningId}
-              onChange={(e) => setSelectedOpeningId(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Requisitions</option>
-              {openingItems.map((op) => (
-                <option key={op.id} value={op.id}>
-                  {op.title}
-                </option>
-              ))}
-            </select>
-
-            {/* Status Filter */}
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Statuses</option>
-              <option value="scheduled">Scheduled</option>
-              <option value="rescheduled">Rescheduled</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-
-            {/* View Switcher */}
-            <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700">
-              <button
-                onClick={() => setActiveTab("agenda")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === "agenda"
-                    ? "bg-blue-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
+    <AppShell title="Interviews & Calendar">
+      <div className="space-y-6 pb-12">
+        <PageHeader
+          title="Interviews & Scheduling"
+          description="Confirmed candidate interview sessions, Google Meet video room links, and calendar FreeBusy scheduling."
+          badge={
+            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+              <CalendarIcon className="h-3 w-3 text-primary" />
+              <span>{filteredInterviews.length} Scheduled</span>
+            </Badge>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setAvailabilityOpen(true)}
+                className="gap-1.5"
               >
-                <ListFilter className="w-3.5 h-3.5" />
-                Agenda
-              </button>
-              <button
-                onClick={() => setActiveTab("calendar")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
-                  activeTab === "calendar"
-                    ? "bg-blue-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
+                <Settings className="w-3.5 h-3.5 text-primary" />
+                <span>Availability Rules</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => refetch()}
+                variant="outline"
+                className="h-8 w-8 p-0"
               >
-                <CalendarDays className="w-3.5 h-3.5" />
-                Calendar
-              </button>
+                <RefreshCw className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          }
+        >
+          {/* Controls Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+            {/* Search */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Input
+                placeholder="Search candidate name or role..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 text-xs h-8 bg-card"
+              />
+            </div>
+
+            {/* Filters & View Switcher */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Opening Filter */}
+              <select
+                value={selectedOpeningId}
+                onChange={(e) => setSelectedOpeningId(e.target.value)}
+                className="bg-card border border-border/80 rounded-md px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              >
+                <option value="all">All Requisitions</option>
+                {openingItems.map((op) => (
+                  <option key={op.id} value={op.id}>
+                    {op.title}
+                  </option>
+                ))}
+              </select>
+
+              {/* Status Filter */}
+              <select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="bg-card border border-border/80 rounded-md px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              >
+                <option value="all">All Statuses</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="rescheduled">Rescheduled</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+
+              {/* View Switcher */}
+              <div className="flex bg-muted/50 p-0.5 rounded-md border border-border/70">
+                <button
+                  onClick={() => setActiveTab("agenda")}
+                  className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition ${
+                    activeTab === "agenda"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <ListFilter className="w-3.5 h-3.5" />
+                  Agenda
+                </button>
+                <button
+                  onClick={() => setActiveTab("calendar")}
+                  className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition ${
+                    activeTab === "calendar"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" />
+                  Calendar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </PageHeader>
 
         {/* Content Area */}
         {isLoading ? (
@@ -226,24 +239,13 @@ export default function InterviewsPage() {
             </Button>
           </div>
         ) : filteredInterviews.length === 0 ? (
-          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-4 border border-slate-700">
-              <CalendarIcon className="w-7 h-7" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-1">No Interviews Scheduled Yet</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto mb-6">
-              When candidates choose a slot using your tokenized scheduling link, confirmed interviews with
-              automatic Google Meet links will appear right here.
-            </p>
-            <Button
-              size="sm"
-              onClick={() => setAvailabilityOpen(true)}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs gap-1.5"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              Configure Weekly Availability
-            </Button>
-          </div>
+          <EmptyState
+            icon={CalendarIcon}
+            title="No Interviews Scheduled Yet"
+            description="When candidates choose an interview slot using your self-scheduling link, confirmed sessions with Google Meet links will appear right here."
+            actionText="Configure Weekly Availability"
+            onAction={() => setAvailabilityOpen(true)}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredInterviews.map((inv) => {
@@ -266,47 +268,47 @@ export default function InterviewsPage() {
               return (
                 <div
                   key={inv.id}
-                  className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 shadow-sm transition flex flex-col justify-between space-y-4"
+                  className="bg-card border border-border/70 dark:border-white/[0.08] hover:border-border rounded-xl p-4 shadow-xs hover:shadow-card-hover transition-all flex flex-col justify-between space-y-4"
                 >
                   {/* Top: Header & Badges */}
                   <div>
-                    <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center justify-between gap-2 mb-2.5">
                       {getStatusBadge(inv.status)}
-                      <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
-                        <Clock className="w-3 h-3 text-slate-500" />
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                        <Clock className="w-3 h-3 text-muted-foreground" />
                         {inv.timezone}
                       </span>
                     </div>
 
-                    <h4 className="text-base font-bold text-white truncate mb-1">
+                    <h4 className="text-sm font-semibold text-foreground truncate mb-1">
                       {inv.candidate_name}
                     </h4>
-                    <p className="text-xs text-blue-400 font-medium truncate flex items-center gap-1.5 mb-3">
+                    <p className="text-xs text-primary font-medium truncate flex items-center gap-1.5 mb-3">
                       <Briefcase className="w-3.5 h-3.5 shrink-0" />
                       {inv.opening_title}
                     </p>
 
                     {/* Date and Time Details */}
-                    <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-1.5 mb-3">
-                      <div className="text-xs font-semibold text-white flex items-center gap-2">
-                        <CalendarIcon className="w-3.5 h-3.5 text-indigo-400" />
+                    <div className="p-3 rounded-lg bg-muted/40 border border-border/60 space-y-1.5 mb-3">
+                      <div className="text-xs font-medium text-foreground flex items-center gap-2">
+                        <CalendarIcon className="w-3.5 h-3.5 text-primary" />
                         {dateFormatted}
                       </div>
-                      <div className="text-xs text-slate-300 font-mono flex items-center gap-2">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <div className="text-xs text-muted-foreground font-mono flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5" />
                         {timeRangeFormatted}
                       </div>
                     </div>
 
                     {/* Candidate Contact */}
-                    <div className="space-y-1 text-xs text-slate-400">
+                    <div className="space-y-1 text-xs text-muted-foreground">
                       <div className="flex items-center gap-1.5 truncate">
-                        <Mail className="w-3 h-3 text-slate-500 shrink-0" />
+                        <Mail className="w-3 h-3 shrink-0" />
                         <span className="truncate">{inv.candidate_email}</span>
                       </div>
                       {inv.candidate_phone && (
                         <div className="flex items-center gap-1.5">
-                          <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                          <Phone className="w-3 h-3 shrink-0" />
                           <span>{inv.candidate_phone}</span>
                         </div>
                       )}
@@ -314,23 +316,23 @@ export default function InterviewsPage() {
 
                     {/* Cancellation reason if cancelled */}
                     {inv.status === "cancelled" && inv.cancellation_reason && (
-                      <div className="mt-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-300 italic">
+                      <div className="mt-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-600 dark:text-rose-400 italic">
                         Reason: {inv.cancellation_reason}
                       </div>
                     )}
                   </div>
 
                   {/* Bottom Actions */}
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                  <div className="pt-3 border-t border-border/60 flex items-center justify-between gap-2">
                     {inv.meet_link && inv.status !== "cancelled" ? (
                       <a
                         href={inv.meet_link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition shadow-xs"
                       >
                         <Video className="w-3.5 h-3.5" />
-                        Join Meet
+                        <span>Join Meet</span>
                       </a>
                     ) : (
                       <div />
@@ -345,7 +347,7 @@ export default function InterviewsPage() {
                             setActionInterview(inv);
                             setActionModalMode("reschedule");
                           }}
-                          className="h-8 text-xs text-slate-300 hover:text-white hover:bg-slate-800"
+                          className="h-8 text-xs text-muted-foreground hover:text-foreground"
                         >
                           Reschedule
                         </Button>

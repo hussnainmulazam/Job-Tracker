@@ -47,6 +47,7 @@ import {
   MatchProgressStatus,
 } from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -413,23 +414,22 @@ export default function JobOpeningDetailPage() {
   return (
     <AppShell title={opening.title}>
       <div className="space-y-6 max-w-6xl pb-16">
-        {/* Breadcrumb Back Link */}
-        <div className="flex items-center justify-between">
-          <Link
-            href="/openings"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <span>Back to All Requisitions</span>
-          </Link>
-
-          <Badge variant="outline" className="text-[11px] capitalize font-medium">
-            Status: {opening.status}
-          </Badge>
-        </div>
+        <PageHeader
+          title={opening.title}
+          description={opening.description}
+          breadcrumbs={[
+            { label: "Job Requisitions", href: "/openings" },
+            { label: opening.title },
+          ]}
+          badge={
+            <Badge variant="outline" className="text-[11px] capitalize font-medium">
+              Status: {opening.status}
+            </Badge>
+          }
+        />
 
         {/* 1. Job Requisition Header Card */}
-        <Card className="border border-border shadow-xs bg-card">
+        <Card className="border border-border/70 dark:border-white/[0.08] shadow-xs bg-card">
           <CardHeader className="pb-3">
             <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
               <div className="space-y-1">

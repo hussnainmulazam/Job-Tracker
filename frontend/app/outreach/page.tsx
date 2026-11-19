@@ -25,6 +25,8 @@ import {
   Copy,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import {
@@ -260,108 +262,103 @@ export default function OutreachPage() {
   const getStageBadge = (stage: string) => {
     switch (stage.toLowerCase()) {
       case "shortlisted":
-        return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">Shortlisted</span>;
+        return <Badge variant="primary" className="text-[11px]">{stage}</Badge>;
       case "contacted":
-        return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">Contacted</span>;
+        return <Badge variant="info" className="text-[11px]">{stage}</Badge>;
       case "scheduled":
       case "interview":
-        return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Scheduled</span>;
+        return <Badge variant="success" className="text-[11px]">{stage}</Badge>;
       case "interviewed":
-        return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/20">Interviewed</span>;
+        return <Badge variant="secondary" className="text-[11px]">{stage}</Badge>;
       default:
-        return <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">{stage}</span>;
+        return <Badge variant="outline" className="text-[11px]">{stage}</Badge>;
     }
   };
 
   return (
-    <AppShell
-      title="Outreach Agent"
-      actions={
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => syncStagesMutation.mutate()}
-            disabled={syncStagesMutation.isPending}
-            className="text-xs border-slate-700 bg-slate-900/60 text-slate-300 hover:text-white flex items-center gap-1.5"
-          >
-            <Clock className={`w-3.5 h-3.5 text-blue-400 ${syncStagesMutation.isPending ? "animate-spin" : ""}`} />
-            Sync Lifecycle Stages
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              refetchQueue();
-              refetchAudit();
-            }}
-            className="text-slate-400 hover:text-white p-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </Button>
-        </div>
-      }
-    >
-      <div className="max-w-7xl mx-auto space-y-8 pb-16">
-        {/* Banner / Header */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-xl">
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-            <div>
-              <div className="flex items-center gap-2.5 mb-2">
-                <span className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
-                  <Sparkles className="w-4 h-4" />
-                </span>
-                <span className="text-xs font-semibold uppercase tracking-wider text-purple-400">
-                  Autonomous Shortlist Outreach
-                </span>
-              </div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">
-                AI Shortlist Outreach & Approval Queue
-              </h1>
-              <p className="text-sm text-slate-400 mt-1 max-w-3xl">
-                Personalized candidate outreach generated from JD & CV data (Gmail API,
-                Hinglish or English). All drafts require recruiter approval before dispatch.
-                Stages update automatically: <strong>Shortlisted</strong> &rarr;{" "}
-                <strong>Contacted</strong> (on reply) &rarr; <strong>Scheduled</strong> (on booking) &rarr;{" "}
-                <strong>Interviewed</strong> (after interview time).
-              </p>
+    <AppShell title="Outreach Agent">
+      <div className="max-w-7xl mx-auto space-y-6 pb-16">
+        <PageHeader
+          title="AI Shortlist Outreach & Approval Queue"
+          description="Personalized candidate engagement generated from JD & CV data. Recruiter approval is strictly required before dispatch. Pipeline stages advance automatically on reply and booking."
+          badge={
+            <Badge variant="primary" className="gap-1 font-mono text-[11px]">
+              <Sparkles className="h-3 w-3" />
+              <span>AI Autonomous</span>
+            </Badge>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => syncStagesMutation.mutate()}
+                disabled={syncStagesMutation.isPending}
+                className="gap-1.5"
+              >
+                <Clock className={`w-3.5 h-3.5 text-muted-foreground ${syncStagesMutation.isPending ? "animate-spin" : ""}`} />
+                <span>Sync Lifecycle Stages</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  refetchQueue();
+                  refetchAudit();
+                }}
+                className="gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Refresh</span>
+              </Button>
             </div>
+          }
+        />
 
-            {/* Quick Stats Pill */}
-            <div className="flex items-center gap-3">
-              <div className="px-4 py-2.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-center">
-                <div className="text-xl font-bold text-amber-400">{queueItems.length}</div>
-                <div className="text-[11px] text-slate-400 uppercase tracking-wider">Awaiting Approval</div>
-              </div>
-              <div className="px-4 py-2.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-center">
-                <div className="text-xl font-bold text-emerald-400">
-                  {auditLogs.filter((a) => a.action === "outreach_sent").length}
-                </div>
-                <div className="text-[11px] text-slate-400 uppercase tracking-wider">Dispatched</div>
-              </div>
+        {/* Quick Stats Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="p-4 rounded-xl bg-card border border-border/70 dark:border-white/[0.08] shadow-xs">
+            <div className="text-xs text-muted-foreground font-medium">Awaiting Approval</div>
+            <div className="text-2xl font-bold tracking-tight text-amber-500 mt-1">{queueItems.length}</div>
+          </div>
+          <div className="p-4 rounded-xl bg-card border border-border/70 dark:border-white/[0.08] shadow-xs">
+            <div className="text-xs text-muted-foreground font-medium">Outreach Dispatched</div>
+            <div className="text-2xl font-bold tracking-tight text-emerald-500 mt-1">
+              {auditLogs.filter((a) => a.action === "outreach_sent").length}
+            </div>
+          </div>
+          <div className="p-4 rounded-xl bg-card border border-border/70 dark:border-white/[0.08] shadow-xs">
+            <div className="text-xs text-muted-foreground font-medium">Total Candidates</div>
+            <div className="text-2xl font-bold tracking-tight text-foreground mt-1">{candidatesList.length}</div>
+          </div>
+          <div className="p-4 rounded-xl bg-card border border-border/70 dark:border-white/[0.08] shadow-xs">
+            <div className="text-xs text-muted-foreground font-medium">Transmission Channel</div>
+            <div className="text-sm font-semibold tracking-tight text-foreground mt-2 flex items-center gap-1.5">
+              <Mail className="w-3.5 h-3.5 text-primary" />
+              <span>Gmail API</span>
             </div>
           </div>
         </div>
 
         {/* AI Drafter Section */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-5">
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <Send className="w-4 h-4 text-purple-400" />
-            Draft New Outreach Message
+        <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-5 sm:p-6 shadow-xs space-y-4">
+          <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Send className="w-4 h-4 text-primary" />
+            <span>Draft New Outreach Message</span>
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Candidate Selector */}
             <div className="md:col-span-2">
-              <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-blue-400" />
+              <label className="text-xs font-medium text-foreground block mb-1.5 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-muted-foreground" />
                 Select Candidate
               </label>
               <select
                 id="select-outreach-candidate"
                 value={selectedCandidateId}
                 onChange={(e) => setSelectedCandidateId(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full bg-background border border-input rounded-lg px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value="">-- Choose Candidate --</option>
                 {candidatesList.map((c) => (
@@ -374,15 +371,15 @@ export default function OutreachPage() {
 
             {/* Channel */}
             <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-blue-400" />
+              <label className="text-xs font-medium text-foreground block mb-1.5 flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-muted-foreground" />
                 Channel
               </label>
               <select
                 id="select-outreach-channel"
                 value="email"
                 disabled
-                className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 cursor-not-allowed"
+                className="w-full bg-muted/40 border border-input rounded-lg px-3 py-2 text-xs text-muted-foreground cursor-not-allowed"
               >
                 <option value="email">Email (Gmail API)</option>
               </select>
@@ -390,15 +387,15 @@ export default function OutreachPage() {
 
             {/* Language */}
             <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-indigo-400" />
+              <label className="text-xs font-medium text-foreground block mb-1.5 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-muted-foreground" />
                 Language
               </label>
               <select
                 id="select-outreach-language"
                 value={draftLanguage}
                 onChange={(e) => setDraftLanguage(e.target.value as "english" | "hinglish")}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full bg-background border border-input rounded-lg px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value="english">English (Professional)</option>
                 <option value="hinglish">Hinglish (Natural / Conversational)</option>
@@ -414,57 +411,57 @@ export default function OutreachPage() {
               placeholder="Optional recruiter notes (e.g. 'Invite for 1st round, highlight GCP expertise')..."
               value={customInstructions}
               onChange={(e) => setCustomInstructions(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full bg-background border border-input rounded-lg px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <Button
               id="btn-generate-outreach"
               onClick={() => draftMutation.mutate()}
               disabled={draftMutation.isPending || !selectedCandidateId}
-              className="w-full sm:w-auto bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1.5 shrink-0 px-5 shadow-lg shadow-purple-500/20"
+              className="w-full sm:w-auto font-medium gap-1.5 shrink-0 px-4 shadow-xs"
             >
               {draftMutation.isPending ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <Sparkles className="w-3.5 h-3.5" />
               )}
-              Generate AI Draft
+              <span>Generate AI Draft</span>
             </Button>
           </div>
         </div>
 
         {/* Tab Switcher & Filters */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-          <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-2xl border border-slate-800">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-border/70 pb-3">
+          <div className="flex items-center gap-1.5 bg-muted/40 p-1 rounded-lg border border-border/70">
             <button
               onClick={() => setActiveTab("queue")}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition ${
                 activeTab === "queue"
-                  ? "bg-purple-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white"
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              Approval Queue ({queueItems.length})
+              <span>Approval Queue ({queueItems.length})</span>
             </button>
             <button
               onClick={() => setActiveTab("audit")}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition ${
                 activeTab === "audit"
-                  ? "bg-purple-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white"
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               <ListFilter className="w-3.5 h-3.5" />
-              Outreach Audit Trail ({auditLogs.length})
+              <span>Outreach Audit Trail ({auditLogs.length})</span>
             </button>
           </div>
 
           {activeTab === "queue" && (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <select
                 value={channelFilter}
                 onChange={(e) => setChannelFilter(e.target.value)}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                className="bg-background border border-input rounded-md px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value="all">Email (Gmail)</option>
               </select>
@@ -475,7 +472,7 @@ export default function OutreachPage() {
                   size="sm"
                   onClick={() => bulkApproveMutation.mutate(selectedMessageIds.length > 0 ? selectedMessageIds : queueItems.map(q => q.message_id))}
                   disabled={bulkApproveMutation.isPending}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  className="font-medium text-xs gap-1.5 shadow-xs"
                 >
                   {bulkApproveMutation.isPending ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -495,15 +492,15 @@ export default function OutreachPage() {
         {activeTab === "queue" && (
           <div className="space-y-4">
             {isQueueLoading ? (
-              <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
-                <RefreshCw className="w-6 h-6 text-purple-400 animate-spin" />
+              <div className="py-20 flex flex-col items-center justify-center text-muted-foreground gap-3">
+                <RefreshCw className="w-6 h-6 text-primary animate-spin" />
                 <span className="text-xs">Loading approval queue...</span>
               </div>
             ) : queueItems.length === 0 ? (
-              <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-12 text-center">
-                <ShieldCheck className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-white mb-1">Queue is clear!</h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
+              <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-12 text-center">
+                <ShieldCheck className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-60" />
+                <h3 className="text-sm font-semibold text-foreground mb-1">Queue is clear!</h3>
+                <p className="text-xs text-muted-foreground max-w-md mx-auto">
                   No outreach messages are currently awaiting recruiter approval. Select a candidate
                   above to generate a new AI draft.
                 </p>
@@ -511,7 +508,7 @@ export default function OutreachPage() {
             ) : (
               <>
                 {/* Select All Checkbox bar */}
-                <div className="flex items-center justify-between px-2 text-xs text-slate-400">
+                <div className="flex items-center justify-between px-2 text-xs text-muted-foreground">
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input
                       type="checkbox"
@@ -520,15 +517,15 @@ export default function OutreachPage() {
                         selectedMessageIds.length === queueItems.length
                       }
                       onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-800 border-slate-700 cursor-pointer"
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                     />
-                    <span>Select all {queueItems.length} draft(s)</span>
+                    <span className="text-foreground font-medium">Select all {queueItems.length} draft(s)</span>
                   </label>
                   <span>Nothing is transmitted without your explicit approval.</span>
                 </div>
 
                 {/* Queue Cards */}
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {queueItems.map((item) => {
                     const isSelected = selectedMessageIds.includes(item.message_id);
                     const isEditing = editingDrafts[item.message_id] !== undefined;
@@ -540,33 +537,33 @@ export default function OutreachPage() {
                     return (
                       <div
                         key={item.message_id}
-                        className={`bg-slate-900 border rounded-3xl p-6 transition shadow-lg ${
+                        className={`bg-card border rounded-xl p-5 transition shadow-xs ${
                           isSelected
-                            ? "border-purple-500/80 bg-slate-900/90"
-                            : "border-slate-800 hover:border-slate-700"
+                            ? "border-primary/80 ring-1 ring-primary/40"
+                            : "border-border/70 dark:border-white/[0.08] hover:border-border"
                         }`}
                       >
                         {/* Header bar */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/70">
                           <div className="flex items-center gap-3">
                             <input
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => handleToggleSelect(item.message_id)}
-                              className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-800 border-slate-700 cursor-pointer"
+                              className="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                             />
                             <div>
                               <div className="flex items-center gap-2">
-                                <h3 className="text-base font-bold text-white">
+                                <h3 className="text-sm font-semibold text-foreground">
                                   {item.candidate_name}
                                 </h3>
                                 {getStageBadge(item.candidate_stage)}
                               </div>
-                              <div className="text-xs text-slate-400 flex items-center gap-3 mt-0.5">
+                              <div className="text-xs text-muted-foreground flex items-center gap-2.5 mt-0.5">
                                 <span>{item.candidate_email}</span>
                                 {item.candidate_phone && <span>• {item.candidate_phone}</span>}
                                 {item.opening_title && (
-                                  <span className="text-slate-300 font-medium">
+                                  <span className="text-foreground font-medium">
                                     • {item.opening_title}
                                   </span>
                                 )}
@@ -576,28 +573,28 @@ export default function OutreachPage() {
 
                           {/* Channel & Language badges */}
                           <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-xl flex items-center gap-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                              <Mail className="w-3 h-3" />
-                              EMAIL
-                            </span>
-                            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">
+                            <Badge variant="outline" className="gap-1 text-[11px]">
+                              <Mail className="w-3 h-3 text-primary" />
+                              <span>EMAIL</span>
+                            </Badge>
+                            <Badge variant="secondary" className="gap-1 text-[11px]">
                               <Globe className="w-3 h-3" />
-                              {item.language.toUpperCase()}
-                            </span>
+                              <span>{item.language.toUpperCase()}</span>
+                            </Badge>
                           </div>
                         </div>
 
                         {/* Scheduling link chip */}
                         {item.scheduling_url && (
-                          <div className="my-3 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs font-mono text-slate-300">
+                          <div className="my-3 p-2.5 rounded-lg bg-muted/40 border border-border/70 flex items-center justify-between text-xs font-mono text-foreground">
                             <div className="flex items-center gap-2 truncate">
-                              <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                              <span className="text-slate-500">Scheduling Link:</span>
-                              <span className="truncate text-blue-300">{item.scheduling_url}</span>
+                              <Calendar className="w-3.5 h-3.5 text-primary shrink-0" />
+                              <span className="text-muted-foreground">Scheduling Link:</span>
+                              <span className="truncate text-primary">{item.scheduling_url}</span>
                             </div>
                             <button
                               onClick={() => copyToClipboard(item.scheduling_url!)}
-                              className="text-slate-400 hover:text-white p-1 ml-2 transition"
+                              className="text-muted-foreground hover:text-foreground p-1 ml-2 transition"
                               title="Copy Scheduling URL"
                             >
                               <Copy className="w-3.5 h-3.5" />
@@ -622,11 +619,11 @@ export default function OutreachPage() {
                                   }))
                                 }
                                 placeholder="Email Subject"
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+                                className="w-full bg-background border border-input rounded-md px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                               />
                             ) : (
-                              <div className="text-xs font-semibold text-slate-200">
-                                Subject: <span className="font-normal">{item.subject || "Interview Invitation"}</span>
+                              <div className="text-xs font-medium text-foreground">
+                                Subject: <span className="text-muted-foreground font-normal">{item.subject || "Interview Invitation"}</span>
                               </div>
                             )}
                           </div>
@@ -647,17 +644,17 @@ export default function OutreachPage() {
                                   },
                                 }))
                               }
-                              className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500 font-sans leading-relaxed"
+                              className="w-full bg-background border border-input rounded-lg p-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-sans leading-relaxed"
                             />
                           ) : (
-                            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                            <div className="bg-muted/30 border border-border/70 rounded-lg p-3.5 text-xs text-foreground whitespace-pre-wrap leading-relaxed font-sans">
                               {item.body}
                             </div>
                           )}
                         </div>
 
                         {/* Card Action Footer */}
-                        <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
+                        <div className="flex items-center justify-between pt-3 border-t border-border/70">
                           <div>
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -669,7 +666,7 @@ export default function OutreachPage() {
                                     delete next[item.message_id];
                                     setEditingDrafts(next);
                                   }}
-                                  className="text-xs text-slate-400"
+                                  className="text-xs text-muted-foreground"
                                 >
                                   Cancel
                                 </Button>
@@ -687,7 +684,7 @@ export default function OutreachPage() {
                                     delete next[item.message_id];
                                     setEditingDrafts(next);
                                   }}
-                                  className="bg-purple-600 hover:bg-purple-500 text-white text-xs"
+                                  className="text-xs shadow-xs"
                                 >
                                   Save Edits
                                 </Button>
@@ -695,7 +692,7 @@ export default function OutreachPage() {
                             ) : (
                               <Button
                                 size="sm"
-                                variant="ghost"
+                                variant="outline"
                                 onClick={() =>
                                   setEditingDrafts((prev) => ({
                                     ...prev,
@@ -705,10 +702,10 @@ export default function OutreachPage() {
                                     },
                                   }))
                                 }
-                                className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5"
+                                className="text-xs gap-1.5"
                               >
-                                <Edit3 className="w-3.5 h-3.5" />
-                                Edit Draft
+                                <Edit3 className="w-3.5 h-3.5 text-muted-foreground" />
+                                <span>Edit Draft</span>
                               </Button>
                             )}
                           </div>
@@ -718,14 +715,14 @@ export default function OutreachPage() {
                             size="sm"
                             onClick={() => approveMutation.mutate(item.message_id)}
                             disabled={approveMutation.isPending}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 px-4 shadow-md shadow-emerald-600/20"
+                            className="font-medium text-xs gap-1.5 px-4 shadow-xs"
                           >
                             {approveMutation.isPending ? (
                               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                               <Send className="w-3.5 h-3.5" />
                             )}
-                            Approve & Send
+                            <span>Approve & Send</span>
                           </Button>
                         </div>
                       </div>
@@ -741,65 +738,66 @@ export default function OutreachPage() {
         {activeTab === "audit" && (
           <div className="space-y-4">
             {isAuditLoading ? (
-              <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
-                <RefreshCw className="w-6 h-6 text-purple-400 animate-spin" />
+              <div className="py-20 flex flex-col items-center justify-center text-muted-foreground gap-3">
+                <RefreshCw className="w-6 h-6 text-primary animate-spin" />
                 <span className="text-xs">Loading audit trail...</span>
               </div>
             ) : auditLogs.length === 0 ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400 text-xs">
+              <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-12 text-center text-muted-foreground text-xs">
                 No outreach events recorded yet.
               </div>
             ) : (
-              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <ListFilter className="w-4 h-4 text-purple-400" />
-                    Lifecycle & Outreach History
+              <div className="bg-card border border-border/70 dark:border-white/[0.08] rounded-xl p-5 sm:p-6 shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-border/70">
+                  <h3 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+                    <ListFilter className="w-4 h-4 text-primary" />
+                    <span>Lifecycle & Outreach History</span>
                   </h3>
-                  <span className="text-xs text-slate-400">
-                    Failed steps display exact error bodies and an interactive Retry button
+                  <span className="text-xs text-muted-foreground">
+                    Failed steps display exact error details and a 1-click Retry button
                   </span>
                 </div>
 
-                <div className="divide-y divide-slate-800/80 space-y-3">
+                <div className="divide-y divide-border/70 space-y-2">
                   {auditLogs.map((log) => {
                     const isFailure =
                       log.action.includes("failed") || log.failure_reason !== null;
                     return (
-                      <div key={log.id} className="pt-3 flex flex-col sm:flex-row items-start justify-between gap-3">
+                      <div key={log.id} className="pt-2.5 flex flex-col sm:flex-row items-start justify-between gap-3">
                         <div className="space-y-1">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <span
-                              className={`text-[11px] font-bold px-2 py-0.5 rounded-lg font-mono ${
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge
+                              variant={
                                 isFailure
-                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  ? "destructive"
                                   : log.action.includes("sent") || log.action.includes("approved")
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                  : "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                              }`}
+                                  ? "success"
+                                  : "primary"
+                              }
+                              className="font-mono text-[11px]"
                             >
                               {log.action}
-                            </span>
+                            </Badge>
 
                             {log.candidate_name && (
-                              <span className="text-xs font-semibold text-white">
+                              <span className="text-xs font-semibold text-foreground">
                                 {log.candidate_name}
                               </span>
                             )}
 
                             {log.from_stage && log.to_stage && (
-                              <span className="text-xs text-slate-400 flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
                                 <span>{log.from_stage}</span>
                                 <span>&rarr;</span>
-                                <span className="text-purple-400 font-medium">{log.to_stage}</span>
+                                <span className="text-foreground font-medium">{log.to_stage}</span>
                               </span>
                             )}
                           </div>
 
                           {/* Failure banner if present */}
                           {isFailure && log.failure_reason && (
-                            <div className="mt-1.5 p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
-                              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                            <div className="mt-1.5 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive flex items-start gap-2">
+                              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                               <div className="font-mono text-[11px] break-all">
                                 {log.failure_reason}
                               </div>
@@ -808,14 +806,14 @@ export default function OutreachPage() {
 
                           {/* Normal details */}
                           {!isFailure && log.details && (
-                            <p className="text-xs text-slate-400 font-mono text-[11px] break-all">
+                            <p className="text-xs text-muted-foreground font-mono text-[11px] break-all">
                               {log.details}
                             </p>
                           )}
                         </div>
 
                         <div className="flex items-center gap-3 shrink-0">
-                          <span className="text-[11px] text-slate-500 font-mono">
+                          <span className="text-[11px] text-muted-foreground font-mono">
                             {new Date(log.created_at).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
@@ -827,13 +825,13 @@ export default function OutreachPage() {
                           {log.retryable && log.message_id && (
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant="destructive"
                               onClick={() => retryMutation.mutate(log.message_id!)}
                               disabled={retryMutation.isPending}
-                              className="text-xs border-rose-700/80 bg-rose-950/30 text-rose-300 hover:text-white hover:bg-rose-900/50 flex items-center gap-1.5 py-1 px-3 rounded-xl"
+                              className="text-xs gap-1.5 py-1 px-3"
                             >
                               <RotateCcw className={`w-3.5 h-3.5 ${retryMutation.isPending ? "animate-spin" : ""}`} />
-                              Retry
+                              <span>Retry</span>
                             </Button>
                           )}
                         </div>

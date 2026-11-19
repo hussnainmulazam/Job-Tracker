@@ -23,6 +23,7 @@ import {
   CandidateStage,
 } from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -132,11 +133,33 @@ export default function CandidateComparePage() {
   return (
     <AppShell title="Candidate Comparison Studio">
       <div className="space-y-6 pb-12">
+        <PageHeader
+          title="Candidate Comparison Studio"
+          description="Side-by-side evaluation of technical fit score rings, unique vs shared skills, AI executive summaries, and CV red flags."
+          badge={
+            <Badge variant="primary" className="gap-1 font-mono text-[11px]">
+              <Scale className="h-3 w-3" />
+              <span>Side-by-Side</span>
+            </Badge>
+          }
+          actions={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => refetch()}
+              className="gap-1.5"
+            >
+              <Users className="w-3.5 h-3.5 text-muted-foreground" />
+              <span>Refresh Profiles</span>
+            </Button>
+          }
+        />
+
         {/* Selector Control Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-border bg-card shadow-2xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-border/70 dark:border-white/[0.08] bg-card shadow-xs">
           <div className="flex items-center gap-2">
             <Briefcase className="h-4 w-4 text-primary shrink-0" />
-            <span className="text-xs font-bold text-foreground">Target Requisition:</span>
+            <span className="text-xs font-semibold text-foreground">Target Requisition:</span>
             <select
               value={activeOpeningId}
               onChange={(e) => {
@@ -144,7 +167,7 @@ export default function CandidateComparePage() {
                 setCandidateAId("");
                 setCandidateBId("");
               }}
-              className="text-xs font-semibold h-8 px-3 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              className="text-xs font-medium h-8 px-2.5 rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               {openings.map((op) => (
                 <option key={op.id} value={op.id}>
@@ -160,7 +183,7 @@ export default function CandidateComparePage() {
               <select
                 value={candidateA?.id || ""}
                 onChange={(e) => setCandidateAId(e.target.value)}
-                className="text-xs font-semibold h-8 px-2.5 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                className="text-xs font-medium h-8 px-2.5 rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {candidates.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -170,14 +193,14 @@ export default function CandidateComparePage() {
               </select>
             </div>
 
-            <span className="text-xs font-black text-muted-foreground uppercase">vs</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">vs</span>
 
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-muted-foreground font-medium">Candidate B:</span>
               <select
                 value={candidateB?.id || ""}
                 onChange={(e) => setCandidateBId(e.target.value)}
-                className="text-xs font-semibold h-8 px-2.5 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                className="text-xs font-medium h-8 px-2.5 rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {candidates.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -239,29 +262,29 @@ export default function CandidateComparePage() {
             {/* Side-by-Side Comparison Columns */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Candidate A Column */}
-              <Card className="border border-border bg-card shadow-xs flex flex-col justify-between">
+              <Card className="border border-border/70 dark:border-white/[0.08] bg-card shadow-card rounded-xl flex flex-col justify-between">
                 <div>
-                  <CardHeader className="pb-4 border-b border-border/60">
+                  <CardHeader className="pb-4 border-b border-border/70">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <ScoreRing score={candidateA.score} size="lg" />
                         <div>
-                          <CardTitle className="text-base font-bold text-foreground">
+                          <CardTitle className="text-base font-semibold tracking-tight text-foreground">
                             {candidateA.name}
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">{candidateA.email}</p>
                         </div>
                       </div>
-                      <Badge variant="outline" className="text-xs capitalize font-semibold">
+                      <Badge variant="outline" className="text-xs capitalize font-medium">
                         {STAGE_LABELS[candidateA.stage]}
                       </Badge>
                     </div>
                   </CardHeader>
 
-                  <CardContent className="space-y-6 pt-5">
+                  <CardContent className="space-y-5 pt-5">
                     {/* Summary */}
                     <div>
-                      <h5 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground mb-1.5">
+                      <h5 className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground mb-1.5">
                         AI Executive Summary
                       </h5>
                       <p className="text-xs text-foreground leading-relaxed">
@@ -271,21 +294,21 @@ export default function CandidateComparePage() {
 
                     {/* Matched Skills */}
                     <div>
-                      <h5 className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
+                      <h5 className="text-[10px] uppercase font-semibold tracking-wider text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
                         <Check className="h-3.5 w-3.5" />
                         Matched Skills ({candidateA.matched_skills.length})
                       </h5>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {candidateA.matched_skills.map((s) => (
                           <span
                             key={s}
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${
                               candidateAUniqueSkills.includes(s)
-                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 ring-1 ring-emerald-500/30"
-                                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 ring-1 ring-emerald-500/20"
+                                : "bg-muted/60 text-muted-foreground border-border/70"
                             }`}
                           >
-                            {s} {candidateAUniqueSkills.includes(s) && "★"}
+                            {s} {candidateAUniqueSkills.includes(s) && "★ Unique"}
                           </span>
                         ))}
                       </div>
@@ -293,15 +316,15 @@ export default function CandidateComparePage() {
 
                     {/* Missing Skills */}
                     <div>
-                      <h5 className="text-[10px] uppercase font-bold tracking-wider text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
+                      <h5 className="text-[10px] uppercase font-semibold tracking-wider text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
                         <X className="h-3.5 w-3.5" />
                         Missing Skills ({candidateA.missing_skills.length})
                       </h5>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {candidateA.missing_skills.map((s) => (
                           <span
                             key={s}
-                            className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                            className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
                           >
                             {s}
                           </span>
@@ -311,8 +334,8 @@ export default function CandidateComparePage() {
 
                     {/* Red Flags */}
                     {candidateA.red_flags && candidateA.red_flags.length > 0 && (
-                      <div className="p-3 rounded-lg border border-rose-500/20 bg-rose-500/5">
-                        <h5 className="text-[10px] uppercase font-bold tracking-wider text-rose-600 dark:text-rose-400 mb-1 flex items-center gap-1">
+                      <div className="p-3.5 rounded-lg border border-destructive/20 bg-destructive/5">
+                        <h5 className="text-[10px] uppercase font-semibold tracking-wider text-destructive mb-1 flex items-center gap-1">
                           <ShieldAlert className="h-3.5 w-3.5" />
                           Red Flags ({candidateA.red_flags.length})
                         </h5>
@@ -326,7 +349,7 @@ export default function CandidateComparePage() {
                   </CardContent>
                 </div>
 
-                <div className="p-4 border-t border-border/60 flex items-center justify-between gap-2">
+                <div className="p-4 border-t border-border/70 flex items-center justify-between gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -334,9 +357,9 @@ export default function CandidateComparePage() {
                       setDrawerCandidate(candidateA);
                       setDrawerOpen(true);
                     }}
-                    className="text-xs h-8 gap-1"
+                    className="text-xs h-8 gap-1.5"
                   >
-                    <span>Full Drawer</span>
+                    <span>Full Profile</span>
                     <ExternalLink className="h-3 w-3" />
                   </Button>
 
@@ -345,7 +368,7 @@ export default function CandidateComparePage() {
                     onClick={() =>
                       stageMutation.mutate({ id: candidateA.id, stage: "interview" })
                     }
-                    className="text-xs h-8 font-semibold"
+                    className="text-xs h-8 font-medium shadow-xs"
                   >
                     Advance to Interview
                   </Button>
@@ -353,29 +376,29 @@ export default function CandidateComparePage() {
               </Card>
 
               {/* Candidate B Column */}
-              <Card className="border border-border bg-card shadow-xs flex flex-col justify-between">
+              <Card className="border border-border/70 dark:border-white/[0.08] bg-card shadow-card rounded-xl flex flex-col justify-between">
                 <div>
-                  <CardHeader className="pb-4 border-b border-border/60">
+                  <CardHeader className="pb-4 border-b border-border/70">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <ScoreRing score={candidateB.score} size="lg" />
                         <div>
-                          <CardTitle className="text-base font-bold text-foreground">
+                          <CardTitle className="text-base font-semibold tracking-tight text-foreground">
                             {candidateB.name}
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">{candidateB.email}</p>
                         </div>
                       </div>
-                      <Badge variant="outline" className="text-xs capitalize font-semibold">
+                      <Badge variant="outline" className="text-xs capitalize font-medium">
                         {STAGE_LABELS[candidateB.stage]}
                       </Badge>
                     </div>
                   </CardHeader>
 
-                  <CardContent className="space-y-6 pt-5">
+                  <CardContent className="space-y-5 pt-5">
                     {/* Summary */}
                     <div>
-                      <h5 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground mb-1.5">
+                      <h5 className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground mb-1.5">
                         AI Executive Summary
                       </h5>
                       <p className="text-xs text-foreground leading-relaxed">
@@ -385,21 +408,21 @@ export default function CandidateComparePage() {
 
                     {/* Matched Skills */}
                     <div>
-                      <h5 className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
+                      <h5 className="text-[10px] uppercase font-semibold tracking-wider text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
                         <Check className="h-3.5 w-3.5" />
                         Matched Skills ({candidateB.matched_skills.length})
                       </h5>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {candidateB.matched_skills.map((s) => (
                           <span
                             key={s}
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${
                               candidateBUniqueSkills.includes(s)
-                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 ring-1 ring-emerald-500/30"
-                                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 ring-1 ring-emerald-500/20"
+                                : "bg-muted/60 text-muted-foreground border-border/70"
                             }`}
                           >
-                            {s} {candidateBUniqueSkills.includes(s) && "★"}
+                            {s} {candidateBUniqueSkills.includes(s) && "★ Unique"}
                           </span>
                         ))}
                       </div>
@@ -407,15 +430,15 @@ export default function CandidateComparePage() {
 
                     {/* Missing Skills */}
                     <div>
-                      <h5 className="text-[10px] uppercase font-bold tracking-wider text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
+                      <h5 className="text-[10px] uppercase font-semibold tracking-wider text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
                         <X className="h-3.5 w-3.5" />
                         Missing Skills ({candidateB.missing_skills.length})
                       </h5>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {candidateB.missing_skills.map((s) => (
                           <span
                             key={s}
-                            className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                            className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
                           >
                             {s}
                           </span>
@@ -425,8 +448,8 @@ export default function CandidateComparePage() {
 
                     {/* Red Flags */}
                     {candidateB.red_flags && candidateB.red_flags.length > 0 && (
-                      <div className="p-3 rounded-lg border border-rose-500/20 bg-rose-500/5">
-                        <h5 className="text-[10px] uppercase font-bold tracking-wider text-rose-600 dark:text-rose-400 mb-1 flex items-center gap-1">
+                      <div className="p-3.5 rounded-lg border border-destructive/20 bg-destructive/5">
+                        <h5 className="text-[10px] uppercase font-semibold tracking-wider text-destructive mb-1 flex items-center gap-1">
                           <ShieldAlert className="h-3.5 w-3.5" />
                           Red Flags ({candidateB.red_flags.length})
                         </h5>
@@ -440,7 +463,7 @@ export default function CandidateComparePage() {
                   </CardContent>
                 </div>
 
-                <div className="p-4 border-t border-border/60 flex items-center justify-between gap-2">
+                <div className="p-4 border-t border-border/70 flex items-center justify-between gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -448,9 +471,9 @@ export default function CandidateComparePage() {
                       setDrawerCandidate(candidateB);
                       setDrawerOpen(true);
                     }}
-                    className="text-xs h-8 gap-1"
+                    className="text-xs h-8 gap-1.5"
                   >
-                    <span>Full Drawer</span>
+                    <span>Full Profile</span>
                     <ExternalLink className="h-3 w-3" />
                   </Button>
 
@@ -459,7 +482,7 @@ export default function CandidateComparePage() {
                     onClick={() =>
                       stageMutation.mutate({ id: candidateB.id, stage: "interview" })
                     }
-                    className="text-xs h-8 font-semibold"
+                    className="text-xs h-8 font-medium shadow-xs"
                   >
                     Advance to Interview
                   </Button>

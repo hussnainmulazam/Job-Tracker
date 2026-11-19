@@ -43,6 +43,8 @@ import { AddCandidateDialog } from "@/components/candidates/add-candidate-dialog
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
@@ -362,15 +364,70 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8.5rem)] w-full">
-      {/* ── Control Bar ────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 shrink-0">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-2xl">
+    <div className="flex flex-col h-[calc(100vh-7.5rem)] w-full space-y-4">
+      {/* ── Page Header & Controls ─────────────────────────────────── */}
+      <PageHeader
+        title="Candidate Pipeline"
+        description="Visual Kanban workflow across Applied, Screening, Interview, Offer, and Rejected stages."
+        badge={
+          <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+            <Users className="h-3 w-3 text-primary" />
+            <span>{filteredCandidates.length} Candidates</span>
+          </Badge>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              id="btn-open-audit-drawer"
+              variant="outline"
+              size="sm"
+              onClick={() => setAuditDrawerOpen(true)}
+              className="gap-1.5"
+              title="View Pipeline Audit Trail"
+            >
+              <History className="h-3.5 w-3.5 text-muted-foreground" />
+              <span>Audit Trail</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportShortlist}
+              className="gap-1.5"
+              title="Download Shortlist CSV"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Export CSV</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isRefetching}
+              className="h-8 w-8 p-0"
+              title="Refresh pipeline"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? "animate-spin" : ""}`} />
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={() => setAddDialogOpen(true)}
+              className="font-medium gap-1.5 shadow-xs"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Add Candidate</span>
+            </Button>
+          </div>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2.5 max-w-3xl">
           {/* Search Input */}
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-[220px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
-              placeholder="Search candidate name, email, or skill..."
+              placeholder="Filter by name, email, or skill..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-8 text-xs h-8 bg-card"
@@ -391,7 +448,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             <select
               value={selectedOpeningId}
               onChange={(e) => setSelectedOpeningId(e.target.value)}
-              className="text-xs h-8 px-2.5 rounded-md border border-input bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary"
+              className="text-xs h-8 px-2.5 rounded-md border border-border/80 bg-card font-medium focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
               <option value="all">All Requisitions ({openings.length})</option>
               {openings.map((op) => (
@@ -402,53 +459,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             </select>
           </div>
         </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          <Button
-            id="btn-open-audit-drawer"
-            variant="outline"
-            size="sm"
-            onClick={() => setAuditDrawerOpen(true)}
-            className="text-xs h-8 gap-1.5"
-            title="View Pipeline Audit Trail"
-          >
-            <History className="h-3.5 w-3.5 text-muted-foreground" />
-            <span>Audit Trail</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportShortlist}
-            className="text-xs h-8 gap-1.5"
-            title="Download Shortlist CSV"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isRefetching}
-            className="text-xs h-8 w-8 p-0"
-            title="Refresh pipeline"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? "animate-spin" : ""}`} />
-          </Button>
-
-          <Button
-            size="sm"
-            onClick={() => setAddDialogOpen(true)}
-            className="text-xs h-8 font-semibold gap-1.5 shadow-xs"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add Candidate
-          </Button>
-        </div>
-      </div>
+      </PageHeader>
 
       {/* ── Mobile Column Tab Switcher ──────────────────────────────── */}
       <div className="flex lg:hidden gap-1 mb-3 overflow-x-auto pb-1 shrink-0">

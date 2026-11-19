@@ -101,30 +101,30 @@ function LoginForm() {
   };
 
   return (
-    <Card className="w-full max-w-md shadow-lg border-slate-200 dark:border-slate-800">
+    <Card className="w-full max-w-md shadow-card border-border/70 dark:border-white/[0.08] rounded-2xl bg-card">
       <CardHeader className="space-y-2 text-center pb-6">
-        <div className="mx-auto h-12 w-12 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md mb-2">
-          <Briefcase className="h-6 w-6" />
+        <div className="mx-auto h-11 w-11 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shadow-xs mb-1">
+          <Briefcase className="h-5 w-5" />
         </div>
-        <CardTitle className="text-2xl font-bold tracking-tight">
+        <CardTitle className="text-xl font-bold tracking-tight text-foreground">
           Welcome back
         </CardTitle>
-        <CardDescription className="text-sm">
-          Enter your email and password to access your application dashboard
+        <CardDescription className="text-xs text-muted-foreground">
+          Enter your credentials to access your recruiting copilot
         </CardDescription>
       </CardHeader>
 
       <CardContent>
         {serverError && (
-          <div className="mb-5 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3.5 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+          <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
             <div className="flex-1 font-medium">{serverError}</div>
           </div>
         )}
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="email" className="text-xs font-semibold">
+            <Label htmlFor="email" className="text-xs font-medium text-foreground">
               Email Address
             </Label>
             <div className="relative">
@@ -133,14 +133,14 @@ function LoginForm() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                placeholder="developer@example.com"
-                className={`pl-9 ${errors.email ? "border-red-500 focus-visible:ring-red-400" : ""}`}
+                placeholder="recruiter@company.com"
+                className={`pl-9 ${errors.email ? "border-destructive focus-visible:ring-destructive" : ""}`}
                 {...register("email")}
                 disabled={isSubmitting}
               />
             </div>
             {errors.email && (
-              <p className="text-[11px] text-red-500 font-medium">
+              <p className="text-[11px] text-destructive font-medium">
                 {errors.email.message}
               </p>
             )}
@@ -148,7 +148,7 @@ function LoginForm() {
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="password" className="text-xs font-semibold">
+              <Label htmlFor="password" className="text-xs font-medium text-foreground">
                 Password
               </Label>
             </div>
@@ -159,7 +159,7 @@ function LoginForm() {
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
                 placeholder="••••••••"
-                className={`pl-9 pr-10 ${errors.password ? "border-red-500 focus-visible:ring-red-400" : ""}`}
+                className={`pl-9 pr-10 ${errors.password ? "border-destructive focus-visible:ring-destructive" : ""}`}
                 {...register("password")}
                 disabled={isSubmitting}
               />
@@ -178,7 +178,7 @@ function LoginForm() {
               </button>
             </div>
             {errors.password && (
-              <p className="text-[11px] text-red-500 font-medium">
+              <p className="text-[11px] text-destructive font-medium">
                 {errors.password.message}
               </p>
             )}
@@ -186,7 +186,7 @@ function LoginForm() {
 
           <Button
             type="submit"
-            className="w-full mt-2 font-medium"
+            className="w-full mt-2 font-medium shadow-xs"
             disabled={isSubmitting}
           >
             {isSubmitting ? (
@@ -204,12 +204,12 @@ function LoginForm() {
         </form>
       </CardContent>
 
-      <CardFooter className="flex flex-col space-y-3 pt-2 text-center text-xs text-muted-foreground border-t">
+      <CardFooter className="flex flex-col space-y-3 pt-2 text-center text-xs text-muted-foreground border-t border-border/70">
         <p>
           Don&apos;t have an account?{" "}
           <Link
             href="/register"
-            className="font-semibold text-blue-600 hover:text-blue-500 hover:underline dark:text-blue-400"
+            className="font-medium text-primary hover:underline"
           >
             Create an account
           </Link>
@@ -227,11 +227,11 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <Suspense
         fallback={
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
             Loading authentication form...
           </div>
         }
