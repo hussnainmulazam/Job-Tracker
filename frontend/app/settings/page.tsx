@@ -38,6 +38,8 @@ import {
   googleApi,
   jobOpeningsApi,
   whatsappApi,
+  healthApi,
+  DbHealthResponse,
   GoogleAccountStatus,
   GmailSyncResponse,
   WhatsAppStatusResponse,
@@ -126,6 +128,18 @@ export default function SettingsPage() {
         environment: string;
       }>("/health");
     },
+  });
+
+  // 2b. Fetch Live PostgreSQL Database Latency & Health
+  const {
+    data: dbHealth,
+    isLoading: isDbHealthLoading,
+    isFetching: isDbHealthFetching,
+    refetch: refetchDbHealth,
+  } = useQuery<DbHealthResponse>({
+    queryKey: ["db-health"],
+    queryFn: () => healthApi.checkDb(),
+    retry: false,
   });
 
   // 3. Fetch Live AI Model Health
@@ -945,14 +959,29 @@ export default function SettingsPage() {
 
         {/* 5. Infrastructure Health */}
         <Card className="border border-border shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-              <Database className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Backend & Database Infrastructure</span>
-            </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground">
-              FastAPI service layer and Supabase PostgreSQL connection
-            </CardDescription>
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                <Database className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Backend & Database Infrastructure</span>
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground">
+                FastAPI service layer and Supabase PostgreSQL connection
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                refetchBackendHealth();
+                refetchDbHealth();
+              }}
+              disabled={isDbHealthFetching || isHealthLoading}
+              className="text-xs h-7 px-2.5 gap-1.5"
+            >
+              <RefreshCw className={`h-3 w-3 ${isDbHealthFetching ? "animate-spin" : ""}`} />
+              Test Now
+            </Button>
           </CardHeader>
           <CardContent className="space-y-2 text-xs">
             <div className="flex items-center justify-between py-1.5 border-b border-border/60">
@@ -962,11 +991,41 @@ export default function SettingsPage() {
               </Badge>
             </div>
             <div className="flex items-center justify-between py-1.5 border-b border-border/60">
-              <span className="text-muted-foreground">Supabase PostgreSQL Database</span>
-              <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px]">
-                {backendHealth?.database || "Connected (Pooler)"}
-              </Badge>
+              <span className="text-muted-foreground">Supabase PostgreSQL Connection</span>
+              <div className="flex items-center gap-2">
+                {dbHealth?.latency_ms !== undefined && (
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${
+                      dbHealth.latency_ms < 150
+                        ? "text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
+                        : dbHealth.latency_ms < 400
+                        ? "text-amber-600 border-amber-500/30 bg-amber-500/10"
+                        : "text-rose-600 border-rose-500/30 bg-rose-500/10"
+                    }`}
+                  >
+                    {dbHealth.latency_ms} ms
+                  </Badge>
+                )}
+                <Badge
+                  className={`text-[10px] ${
+                    dbHealth?.status === "connected"
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                      : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
+                  }`}
+                >
+                  {dbHealth?.status === "connected" ? "Connected (Pooler)" : "Unreachable"}
+                </Badge>
+              </div>
             </div>
+            {dbHealth?.host && (
+              <div className="flex items-center justify-between py-1.5 border-b border-border/60">
+                <span className="text-muted-foreground">Connection Endpoint</span>
+                <span className="font-mono text-muted-foreground text-[11px]">
+                  {dbHealth.host}:{dbHealth.port} ({dbHealth.mode} pooler)
+                </span>
+              </div>
+            )}
             <div className="flex items-center justify-between py-1.5">
               <span className="text-muted-foreground">API Version</span>
               <span className="font-mono text-muted-foreground text-[11px]">

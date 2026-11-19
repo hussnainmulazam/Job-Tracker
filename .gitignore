@@ -1,4 +1,4 @@
-﻿# Secrets
+# Secrets
 .env
 .env.local
 backend/.env
@@ -24,3 +24,5 @@ test-results/
 frontend/test-results/
 debug.log
 .DS_Store
+backups/
+*.sql

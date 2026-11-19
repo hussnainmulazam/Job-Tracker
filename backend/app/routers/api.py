@@ -8,6 +8,7 @@ from app.routers import (
     auth_google,
     candidates,
     dashboard,
+    health,
     integrations_google,
     job_openings,
     notifications,
@@ -19,6 +20,7 @@ from app.routers import (
 )
 
 api_router = APIRouter()
+api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(auth_google.router)
 api_router.include_router(integrations_google.router)

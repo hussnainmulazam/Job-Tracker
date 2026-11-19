@@ -35,7 +35,13 @@ export function middleware(request: NextRequest) {
   }
 
   // 2. Prevent already authenticated users from accessing /login and /register
+  // If there is a 'redirect' parameter, the user was sent here due to 401/expired session — clear cookie and render login
   if (isAuthPage && token) {
+    if (request.nextUrl.searchParams.has("redirect")) {
+      const response = NextResponse.next();
+      response.cookies.delete("auth_token");
+      return response;
+    }
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

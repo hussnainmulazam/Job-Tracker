@@ -473,9 +473,15 @@ export async function apiFetch<T>(
     removeAuthToken();
 
     if (typeof window !== "undefined") {
+      try {
+        fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+        document.cookie = "auth_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+      } catch {}
+
       const currentPath = window.location.pathname;
       if (!currentPath.startsWith("/login") && !currentPath.startsWith("/register")) {
-        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+        // Use replace to avoid browser back history loop and clear ongoing polling
+        window.location.replace(`/login?redirect=${encodeURIComponent(currentPath)}`);
       }
     }
 
@@ -1357,4 +1363,20 @@ export const outreachApi = {
 
   syncStages: () =>
     api.post<StageSyncResponse>("/api/v1/outreach/sync-stages"),
+};
+
+// ── Health API ─────────────────────────────────────────────────────────────
+
+export interface DbHealthResponse {
+  status: "connected" | "error";
+  latency_ms: number;
+  host?: string;
+  port?: number;
+  mode?: "session" | "transaction";
+  error?: string;
+}
+
+export const healthApi = {
+  checkDb: () => api.get<DbHealthResponse>("/health/db"),
+  checkBackend: () => api.get<{ status: string; database?: string; version: string; environment?: string }>("/health"),
 };

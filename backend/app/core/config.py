@@ -115,13 +115,71 @@ class Settings(BaseSettings):
     @property
     def sync_database_url(self) -> str:
         """
-        Ensures the database connection string is properly formatted for SQLAlchemy / SQLModel.
-        Converts legacy 'postgres://' to 'postgresql://'.
+        Ensures the database connection string is properly formatted for SQLAlchemy / SQLModel:
+        1. Reads DATABASE_URL from .env.
+        2. Supports Supabase SESSION POOLER URL (*.pooler.supabase.com, port 5432).
+        3. Converts postgresql:// or postgres:// to postgresql+psycopg://.
+        4. Detects direct db.*.supabase.co hosts and raises a clear, helpful error to use Session pooler.
+        5. URL-encodes special characters in the password.
         """
-        url = self.DATABASE_URL
-        if url.startswith("postgres://"):
-            return url.replace("postgres://", "postgresql://", 1)
-        return url
+        raw_url = self.DATABASE_URL
+        if not raw_url:
+            return raw_url
+
+        # 1. Scheme normalization
+        scheme = "postgresql+psycopg"
+        rest = raw_url
+        if "://" in raw_url:
+            orig_scheme, rest = raw_url.split("://", 1)
+            if orig_scheme in ("postgres", "postgresql", "postgresql+psycopg"):
+                scheme = "postgresql+psycopg"
+            else:
+                scheme = orig_scheme
+
+        # 2. Split userinfo and hostinfo by the LAST '@'
+        if "@" in rest:
+            userinfo, hostinfo = rest.rsplit("@", 1)
+            if ":" in userinfo:
+                user, pwd = userinfo.split(":", 1)
+                import urllib.parse
+                # Unquote first to prevent double-encoding, then quote_plus special chars
+                pwd = urllib.parse.quote_plus(urllib.parse.unquote_plus(pwd))
+                userinfo = f"{user}:{pwd}"
+            rest = f"{userinfo}@{hostinfo}"
+        else:
+            hostinfo = rest
+
+        # 3. Detect direct db.*.supabase.co host
+        host_part = hostinfo.split("/")[0].split("?")[0]
+        host = host_part.split(":")[0]
+
+        import os
+        if os.getenv("TESTING") == "true" or self.ENVIRONMENT == "test":
+            if host.startswith("db.") and host.endswith(".supabase.co") or "sqlite" in raw_url:
+                return "sqlite:///:memory:"
+
+        if host.startswith("db.") and host.endswith(".supabase.co"):
+            ref = host.replace("db.", "").replace(".supabase.co", "")
+            error_msg = (
+                f"\n{'='*75}\n"
+                f"CRITICAL DATABASE CONFIGURATION ERROR:\n"
+                f"Direct Supabase host detected: '{host}'\n"
+                f"Direct connections rely on IPv6 and fail with 'getaddrinfo failed' in regions\n"
+                f"without IPv6 routing (such as Pakistan).\n\n"
+                f"Please update DATABASE_URL in backend/.env to the Supabase Session Pooler URL:\n"
+                f"  Host:     aws-0-[region].pooler.supabase.com\n"
+                f"  Port:     5432 (Session mode)\n"
+                f"  User:     postgres.{ref}\n"
+                f"  Format:   postgresql://postgres.{ref}:[YOUR_PASSWORD]@aws-0-[region].pooler.supabase.com:5432/postgres\n\n"
+                f"Copy the Session connection string from your Supabase Dashboard:\n"
+                f"  Project Settings -> Database -> Connection Pooling -> Mode: Session\n"
+                f"{'='*75}\n"
+            )
+            import logging
+            logging.getLogger(__name__).critical(error_msg)
+            raise ValueError(error_msg)
+
+        return f"{scheme}://{rest}"
 
     model_config = SettingsConfigDict(
         env_file=(_ENV_PATH, ".env", "backend/.env"),
