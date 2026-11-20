@@ -7,7 +7,7 @@ and template registry compliance.
 import sys
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # Add backend to path
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -121,12 +121,13 @@ def test_full_hiring_pipeline_lifecycle():
         print("[PASS] Stage 3 (HR Review Approve) dispatched application_approved and set INITIAL_SCHEDULING.")
 
         # ── STAGE 4: SCHEDULING ENGINE (Initial Interview) ──
-        import asyncio
-        sched_res = asyncio.run(agent.stage_4_handle_availability_reply(
+        now_utc = datetime.now(timezone.utc)
+        sched_res = agent.stage_4_handle_availability_reply(
             candidate_id=cand.id,
             round_name="Initial",
             reply_text="I am free next Tuesday at 2 PM EST.",
-        ))
+            suggested_dt=now_utc + timedelta(days=2),
+        )
         session.refresh(cand)
         assert get_candidate_pipeline_status(cand) == PipelineStatus.INITIAL_SCHEDULED
 
@@ -158,11 +159,12 @@ def test_full_hiring_pipeline_lifecycle():
         print("[PASS] Stage 6 (Initial Approval) dispatched interview_passed & next_round_availability for Behavioral.")
 
         # ── STAGE 4 & 6: Behavioral Round Scheduling & Approval ──
-        asyncio.run(agent.stage_4_handle_availability_reply(
+        agent.stage_4_handle_availability_reply(
             candidate_id=cand.id,
             round_name="Behavioral",
             reply_text="Wednesday at 11 AM works for Behavioral round.",
-        ))
+            suggested_dt=now_utc + timedelta(days=4),
+        )
         session.refresh(cand)
         assert get_candidate_pipeline_status(cand) == PipelineStatus.BEHAVIORAL_SCHEDULED
 
@@ -176,11 +178,12 @@ def test_full_hiring_pipeline_lifecycle():
         print("[PASS] Stage 6 (Behavioral Approval) advanced candidate to TECHNICAL_SCHEDULING.")
 
         # ── STAGE 4 & 6: Technical Round Scheduling & Final Approval ──
-        asyncio.run(agent.stage_4_handle_availability_reply(
+        agent.stage_4_handle_availability_reply(
             candidate_id=cand.id,
             round_name="Technical",
             reply_text="Thursday at 3 PM for Technical round.",
-        ))
+            suggested_dt=now_utc + timedelta(days=6),
+        )
         session.refresh(cand)
         assert get_candidate_pipeline_status(cand) == PipelineStatus.TECHNICAL_SCHEDULED
 
@@ -268,10 +271,79 @@ def test_full_hiring_pipeline_lifecycle():
         print("[PASS] Rejection with feedback quote and idempotency verified.")
 
 
+def test_background_cycles_and_reminders():
+    with Session(engine) as session:
+        user = User(id=uuid.uuid4(), email="recruiter2@aivontech.com", hashed_password="dummy")
+        session.add(user)
+        session.commit()
+
+        op = JobOpening(id=uuid.uuid4(), user_id=user.id, title="Backend Lead", description="Desc", status="active")
+        session.add(op)
+        session.commit()
+
+        # 1. Candidate in HR_REVIEW for > 48h
+        old_time = datetime.now(timezone.utc) - timedelta(hours=50)
+        c_old = Candidate(
+            user_id=user.id,
+            opening_id=op.id,
+            name="Stale Review",
+            email="stale@test.com",
+            cv_text="CV text",
+            created_at=old_time,
+            updated_at=old_time,
+            extracted_data={"pipeline_status": PipelineStatus.HR_REVIEW},
+        )
+        session.add(c_old)
+        session.commit()
+
+        # 2. Candidate scheduled for interview in 12 hours (should get 24h reminder)
+        c_sched = Candidate(
+            user_id=user.id,
+            opening_id=op.id,
+            name="Scheduled Interviewee",
+            email="sched@test.com",
+            cv_text="CV text",
+            extracted_data={"pipeline_status": PipelineStatus.INITIAL_SCHEDULED},
+        )
+        session.add(c_sched)
+        session.commit()
+
+        iv_time = datetime.now(timezone.utc) + timedelta(hours=12)
+        from app.models.interview import Interview, InterviewStatus
+        iv = Interview(
+            user_id=user.id,
+            candidate_id=c_sched.id,
+            opening_id=op.id,
+            title="Initial Interview: Scheduled Interviewee",
+            candidate_name=c_sched.name,
+            candidate_email=c_sched.email,
+            interviewer_email=user.email,
+            round_type="initial",
+            start_time=iv_time,
+            end_time=iv_time + timedelta(minutes=45),
+            status=InterviewStatus.scheduled,
+            meet_link="https://meet.google.com/test-meet",
+        )
+        session.add(iv)
+        session.commit()
+
+        agent = HiringPipelineAgent(session, user.id)
+        cycle_res = agent.process_background_cycles()
+        print("Cycle execution result:", cycle_res)
+
+        assert cycle_res["reminders_dispatched"] >= 1
+        msg_remind = session.exec(
+            select(Message).where(Message.candidate_id == c_sched.id, Message.template_name == "interview_reminder_24h")
+        ).first()
+        assert msg_remind is not None
+        print("[PASS] Background 24h interview reminder cycle dispatched successfully.")
+
+
 if __name__ == "__main__":
     setup_module()
     test_registry_contains_all_templates()
     test_full_hiring_pipeline_lifecycle()
+    test_background_cycles_and_reminders()
     print("\n=======================================================")
     print("ALL HIRING PIPELINE AGENT TESTS PASSED (100% SUCCESS)!")
     print("=======================================================")

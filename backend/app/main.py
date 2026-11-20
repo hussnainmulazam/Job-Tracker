@@ -73,14 +73,17 @@ async def _periodic_pipeline_agent_worker():
             from app.models.user import User
             from app.services.pipeline_agent_service import HiringPipelineAgent
 
-            with Session(engine) as session:
-                users = session.exec(select(User)).all()
-                for u in users:
-                    try:
-                        agent = HiringPipelineAgent(session, u.id)
-                        await agent.process_background_cycles()
-                    except Exception as ag_err:
-                        logger.warning("Pipeline agent cycle error for user %s: %s", u.id, ag_err)
+            def _run_agent_sync():
+                with Session(engine) as session:
+                    users = session.exec(select(User)).all()
+                    for u in users:
+                        try:
+                            agent = HiringPipelineAgent(session, u.id)
+                            agent.process_background_cycles()
+                        except Exception as ag_err:
+                            logger.warning("Pipeline agent cycle error for user %s: %s", u.id, ag_err)
+
+            await asyncio.to_thread(_run_agent_sync)
         except asyncio.CancelledError:
             logger.info("Periodic Hiring Pipeline Agent worker cancelled.")
             break

@@ -127,9 +127,45 @@ export const KanbanCard = memo(function KanbanCard({
 
       {/* Opening / Role badge */}
       {candidate.opening_title && (
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground/85 mb-2 truncate">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground/85 mb-1.5 truncate">
           <Briefcase className="h-3 w-3 text-primary shrink-0" />
           <span className="truncate">{candidate.opening_title}</span>
+        </div>
+      )}
+
+      {/* Pipeline Agent Status Pill */}
+      {candidate.extracted_data && (candidate.extracted_data as any).pipeline_status && (
+        <div className="flex items-center gap-1 mb-2">
+          {(() => {
+            const rawStatus = String((candidate.extracted_data as any).pipeline_status);
+            const isAttention = rawStatus === "NEEDS_ATTENTION";
+            const isScheduled = rawStatus.includes("SCHEDULED");
+            const isScheduling = rawStatus.includes("SCHEDULING");
+            const isOffer = rawStatus.includes("OFFER");
+            const isReview = rawStatus === "HR_REVIEW" || rawStatus.includes("DECISION");
+
+            const badgeColor = isAttention
+              ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25"
+              : isScheduled
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+              : isOffer
+              ? "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/25"
+              : isReview
+              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25"
+              : isScheduling
+              ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25"
+              : "bg-primary/10 text-primary border-primary/20";
+
+            return (
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-semibold tracking-wide border ${badgeColor}`}
+                title={`Pipeline Stage: ${rawStatus}`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-current shrink-0 animate-pulse" />
+                <span className="truncate">{rawStatus.replace(/_/g, " ")}</span>
+              </span>
+            );
+          })()}
         </div>
       )}
 

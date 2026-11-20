@@ -1692,3 +1692,41 @@ export const agentApi = {
     api.post<{ status: string; message: string }>("/api/v1/agent/test-failure-alert", {}),
 };
 
+export interface PipelineAgentStatusResponse {
+  status: string;
+  background_worker: string;
+  active_candidates: number;
+  timestamp: string;
+}
+
+export interface PipelineAgentLog {
+  candidate_id: string;
+  previous_status: string;
+  new_status: string;
+  action_taken: string;
+  template_sent?: string | null;
+  next_pending_action?: string | null;
+  timer_set?: string | null;
+  timestamp: string;
+}
+
+export const pipelineAgentApi = {
+  getStatus: () =>
+    api.get<PipelineAgentStatusResponse>("/api/v1/pipeline-agent/status"),
+  runCycle: () =>
+    api.post<{ result: any; timestamp: string }>("/api/v1/pipeline-agent/cycle"),
+  hrReview: (payload: { candidate_id: string; decision: "approve" | "reject" | "on_hold"; feedback?: string }) =>
+    api.post("/api/v1/pipeline-agent/hr-review", payload),
+  candidateReply: (payload: { candidate_id: string; reply_body: string }) =>
+    api.post("/api/v1/pipeline-agent/candidate-reply", payload),
+  interviewDecision: (payload: { candidate_id: string; round_name?: string; decision: "pass" | "reject"; feedback?: string }) =>
+    api.post("/api/v1/pipeline-agent/interview-decision", payload),
+  offerAction: (payload: { candidate_id: string; action_type: string; details?: Record<string, any> }) =>
+    api.post("/api/v1/pipeline-agent/offer-action", payload),
+  getCandidateHistory: (candidateId: string) =>
+    api.get<{ candidate_id: string; current_status: string; pipeline_logs: PipelineAgentLog[] }>(
+      `/api/v1/pipeline-agent/candidate/${candidateId}/history`
+    ),
+};
+
+

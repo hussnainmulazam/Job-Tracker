@@ -93,12 +93,12 @@ def get_agent_status(
 
 
 @router.post("/cycle", summary="Trigger autonomous background cycles (reminders, timers, escalations)")
-async def run_agent_cycle(
+def run_agent_cycle(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     agent = HiringPipelineAgent(session, current_user.id)
-    cycle_result = await agent.process_background_cycles()
+    cycle_result = agent.process_background_cycles()
     return {"message": "Pipeline agent background cycle completed.", **cycle_result}
 
 
@@ -139,14 +139,14 @@ def hr_review_decision(
 
 
 @router.post("/candidate-reply", summary="Stage 4: Process candidate availability reply & match calendar")
-async def candidate_availability_reply(
+def candidate_availability_reply(
     payload: CandidateReplyRequest,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     agent = HiringPipelineAgent(session, current_user.id)
     try:
-        result = await agent.stage_4_handle_availability_reply(
+        result = agent.stage_4_handle_availability_reply(
             candidate_id=payload.candidate_id,
             round_name=payload.round_name,
             reply_text=payload.reply_text,

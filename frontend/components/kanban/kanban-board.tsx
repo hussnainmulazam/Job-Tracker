@@ -502,10 +502,16 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
         title="Candidate Pipeline"
         description="Active candidate evaluation pipeline with real-time drag-and-drop, table views, and automated actions."
         badge={
-          <Badge variant="outline" className="gap-1 font-mono text-[11px] bg-card">
-            <Users className="h-3 w-3 text-primary" />
-            <span>{filteredCandidates.length} Active Candidates</span>
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="gap-1 font-mono text-[11px] bg-card">
+              <Users className="h-3 w-3 text-primary" />
+              <span>{filteredCandidates.length} Active Candidates</span>
+            </Badge>
+            <Badge variant="outline" className="gap-1.5 font-mono text-[11px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Pipeline Agent Active</span>
+            </Badge>
+          </div>
         }
         actions={
           <div className="flex items-center gap-2">

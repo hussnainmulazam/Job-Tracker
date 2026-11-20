@@ -226,11 +226,12 @@ def dispatch_pipeline_template_email(
 
     # 6. Attempt real delivery via GoogleService if account connected
     try:
-        from app.services.google_service import GoogleService
-        google_service = GoogleService(session)
-        # Try real Gmail API send if connected
-        try:
+        from app.models.google_account import GoogleAccount
+        account = session.exec(select(GoogleAccount).where(GoogleAccount.user_id == user_id)).first()
+        if account and account.refresh_token:
+            from app.services.google_service import GoogleService
             from app.schemas.google import GoogleSendEmailRequest
+            google_service = GoogleService(session)
             send_req = GoogleSendEmailRequest(
                 candidate_id=candidate.id,
                 subject=subject,
@@ -240,13 +241,8 @@ def dispatch_pipeline_template_email(
             )
             google_service.send_email(user_id=user_id, request=send_req)
             logger.info("Email '%s' dispatched via connected Gmail for %s", template_id, candidate.email)
-        except Exception as g_err:
-            logger.warning(
-                "Could not send via Gmail API (%s). Message recorded locally as sent.",
-                g_err,
-            )
     except Exception as exc:
-        logger.warning("Google service initialization note: %s", exc)
+        logger.warning("Google service dispatch note: %s", exc)
 
     # 7. Record in AuditLog
     audit_entry = AuditLog(

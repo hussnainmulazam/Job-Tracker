@@ -30,11 +30,27 @@ import {
   History,
   Trash2,
   RefreshCw,
+  Bot,
+  ArrowRight,
+  ShieldCheck,
+  MailCheck,
+  Send,
+  Award,
+  Clock,
+  AlertCircle,
 } from "lucide-react";
 import { ScheduleInviteModal } from "@/components/scheduling/schedule-invite-modal";
 import { SendEmailDialog } from "@/components/candidates/send-email-dialog";
 import { ContactCandidateDialog } from "@/components/candidates/contact-candidate-dialog";
-import { Candidate, CandidateStage, candidatesApi, scorecardsApi, Scorecard } from "@/lib/api";
+import {
+  Candidate,
+  CandidateStage,
+  candidatesApi,
+  scorecardsApi,
+  Scorecard,
+  pipelineAgentApi,
+  PipelineAgentLog,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScoreRing } from "@/components/ui/score-ring";
@@ -100,6 +116,93 @@ export function CandidateDrawer({
     queryKey: ["candidate-audit-logs", candidate?.id],
     queryFn: () => (candidate?.id ? candidatesApi.getAuditLogs(candidate.id) : Promise.resolve([])),
     enabled: !!candidate?.id && open,
+  });
+
+  // Pipeline Agent State & Query
+  const [rejectFeedback, setRejectFeedback] = useState("");
+  const [feedbackPromptOpen, setFeedbackPromptOpen] = useState(false);
+  const [pendingAgentAction, setPendingAgentAction] = useState<"hr_review_reject" | "interview_reject" | null>(null);
+
+  const { data: pipelineHistoryData, refetch: refetchPipelineHistory } = useQuery({
+    queryKey: ["pipeline-agent-history", candidate?.id],
+    queryFn: () => (candidate?.id ? pipelineAgentApi.getCandidateHistory(candidate.id) : null),
+    enabled: !!candidate?.id && open,
+    refetchInterval: 8000,
+  });
+
+  const hrReviewMutation = useMutation({
+    mutationFn: ({ decision, feedback }: { decision: "approve" | "reject" | "on_hold"; feedback?: string }) =>
+      pipelineAgentApi.hrReview({
+        candidate_id: candidate!.id,
+        decision,
+        feedback,
+      }),
+    onSuccess: (data: any) => {
+      toast({
+        title: "HR Review Decision Logged",
+        description: data?.action_taken || "Candidate pipeline status updated.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-agent-history", candidate?.id] });
+      setFeedbackPromptOpen(false);
+      setRejectFeedback("");
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Agent Review Action Failed",
+        description: err.message || "Could not process review decision.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const interviewDecisionMutation = useMutation({
+    mutationFn: ({ decision, feedback }: { decision: "pass" | "reject"; feedback?: string }) =>
+      pipelineAgentApi.interviewDecision({
+        candidate_id: candidate!.id,
+        decision,
+        feedback,
+      }),
+    onSuccess: (data: any) => {
+      toast({
+        title: "Interview Decision Logged",
+        description: data?.action_taken || "Candidate advanced in pipeline.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-agent-history", candidate?.id] });
+      setFeedbackPromptOpen(false);
+      setRejectFeedback("");
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Interview Decision Failed",
+        description: err.message || "Could not process interview decision.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const offerActionMutation = useMutation({
+    mutationFn: (action_type: string) =>
+      pipelineAgentApi.offerAction({
+        candidate_id: candidate!.id,
+        action_type,
+      }),
+    onSuccess: (data: any) => {
+      toast({
+        title: "Offer Stage Action Dispatched",
+        description: data?.action_taken || "Offer template sent successfully.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-agent-history", candidate?.id] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Offer Action Failed",
+        description: err.message || "Could not dispatch template.",
+        variant: "destructive",
+      });
+    },
   });
 
   // AI Scoring Mutation
@@ -593,6 +696,44 @@ export function CandidateDrawer({
               </div>
             </div>
           )}
+
+          {/* ── Hiring Pipeline Agent Active Status & Stage Quick Action ───────── */}
+          {(() => {
+            const rawStatus = (candidate.extracted_data as any)?.pipeline_status || pipelineHistoryData?.current_status;
+            if (!rawStatus) return null;
+            return (
+              <div className="mt-3 p-3 rounded-xl bg-primary/[0.04] border border-primary/20 flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <Bot className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-foreground">Pipeline Agent</span>
+                      <Badge variant="outline" className="text-[10px] font-mono capitalize bg-background">
+                        {String(rawStatus).replace(/_/g, " ")}
+                      </Badge>
+                    </div>
+                    <p className="text-[10.5px] text-muted-foreground truncate">
+                      Autonomous stage progression active • Background worker running
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setActiveTab("pipeline_agent")}
+                    className="h-7 px-2.5 text-xs font-semibold text-primary gap-1"
+                  >
+                    <span>Agent Control & History</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── Tabs Navigation ───────────────────────────────────────── */}
@@ -608,6 +749,13 @@ export function CandidateDrawer({
                 className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-1 font-semibold text-xs h-10"
               >
                 AI Fit & Skills
+              </TabsTrigger>
+              <TabsTrigger
+                value="pipeline_agent"
+                className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-1 font-semibold text-xs h-10 gap-1.5"
+              >
+                <Bot className="h-3.5 w-3.5 text-primary" />
+                <span>Pipeline Agent</span>
               </TabsTrigger>
               <TabsTrigger
                 value="questions"
@@ -1156,9 +1304,318 @@ export function CandidateDrawer({
                 </div>
               )}
             </TabsContent>
+
+            {/* ── Hiring Pipeline Agent Tab ─────────────────────────── */}
+            <TabsContent value="pipeline_agent" className="mt-0 space-y-5">
+              {(() => {
+                const rawStatus = (candidate.extracted_data as any)?.pipeline_status || pipelineHistoryData?.current_status || "CV_RECEIVED";
+                const logs = pipelineHistoryData?.pipeline_logs || (candidate.extracted_data as any)?.pipeline_logs || [];
+
+                const isReviewStage = rawStatus === "HR_REVIEW" || candidate.stage === "screening" || candidate.stage === "applied";
+                const isDecisionStage = rawStatus === "INITIAL_DECISION" || rawStatus === "BEHAVIORAL_DECISION" || rawStatus === "TECHNICAL_DECISION";
+                const isOfferStage = rawStatus === "OFFER_LETTER_SECTION" || candidate.stage === "offer";
+
+                return (
+                  <div className="space-y-5">
+                    {/* Status Overview Card */}
+                    <div className="rounded-2xl border border-border/80 bg-card p-4 space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-4 w-4 text-primary" />
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-foreground">Current Agent State</h4>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => refetchPipelineHistory()}
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                          title="Refresh history"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold text-muted-foreground">Pipeline State:</span>
+                        <Badge variant="outline" className="text-xs font-mono px-2 py-0.5 bg-primary/10 text-primary border-primary/25 font-bold">
+                          {String(rawStatus).replace(/_/g, " ")}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* HR Action Center: Review Stage */}
+                    {isReviewStage && (
+                      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                            Stage 3: HR Review Decision Required
+                          </h4>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          AI screening is complete. The agent waits for HR approval before dispatching official emails. Approving will automatically send the candidate an availability request with the full job description.
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            disabled={hrReviewMutation.isPending}
+                            onClick={() => hrReviewMutation.mutate({ decision: "approve" })}
+                            className="h-8 gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                          >
+                            {hrReviewMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                            <span>Approve (Send Availability Request)</span>
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={hrReviewMutation.isPending}
+                            onClick={() => hrReviewMutation.mutate({ decision: "on_hold" })}
+                            className="h-8 text-xs font-medium"
+                          >
+                            <span>Hold / Talent Pool</span>
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={hrReviewMutation.isPending}
+                            onClick={() => {
+                              setPendingAgentAction("hr_review_reject");
+                              setFeedbackPromptOpen(true);
+                            }}
+                            className="h-8 gap-1.5 text-xs font-semibold shadow-xs"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            <span>Reject with Feedback</span>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* HR Action Center: Interview Decision Stage */}
+                    {isDecisionStage && (
+                      <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Award className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                            Stage 6: Interview Round Decision Required
+                          </h4>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Review feedback from the interviewers. Passing advances the candidate to the next round (or Offer section if Technical round).
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            disabled={interviewDecisionMutation.isPending}
+                            onClick={() => interviewDecisionMutation.mutate({ decision: "pass" })}
+                            className="h-8 gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                          >
+                            {interviewDecisionMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                            <span>Pass Round (Advance Next)</span>
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={interviewDecisionMutation.isPending}
+                            onClick={() => {
+                              setPendingAgentAction("interview_reject");
+                              setFeedbackPromptOpen(true);
+                            }}
+                            className="h-8 gap-1.5 text-xs font-semibold shadow-xs"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            <span>Reject Round (with Feedback)</span>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* HR Action Center: Offer Stage Manual Actions */}
+                    {isOfferStage && (
+                      <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Award className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                            Stage 7: Offer Letter Section (HR Manual Send)
+                          </h4>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          The autonomous agent halts here. Final offer decisions and letter dispatches are strictly manual by HR.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={offerActionMutation.isPending}
+                            onClick={() => offerActionMutation.mutate("documents_request")}
+                            className="h-8 text-xs font-medium justify-start gap-1.5"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-primary" />
+                            <span>1. Request Verification Docs</span>
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={offerActionMutation.isPending}
+                            onClick={() => offerActionMutation.mutate("offer_letter_cover")}
+                            className="h-8 text-xs font-medium justify-start gap-1.5"
+                          >
+                            <MailCheck className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>2. Send Offer Cover Note</span>
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={offerActionMutation.isPending}
+                            onClick={() => offerActionMutation.mutate("offer_accepted")}
+                            className="h-8 text-xs font-medium justify-start gap-1.5"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>3. Confirm Offer Accepted</span>
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={offerActionMutation.isPending}
+                            onClick={() => offerActionMutation.mutate("welcome_onboarding")}
+                            className="h-8 text-xs font-medium justify-start gap-1.5"
+                          >
+                            <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                            <span>4. Send Welcome & Onboarding</span>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pipeline Execution Log Table */}
+                    <div className="rounded-2xl border border-border/80 bg-card p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <History className="h-3.5 w-3.5 text-muted-foreground" />
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-foreground">
+                            Agent Execution Log ({logs.length})
+                          </h4>
+                        </div>
+                      </div>
+
+                      {logs.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-3 text-center">
+                          No pipeline agent actions logged yet for this candidate.
+                        </p>
+                      ) : (
+                        <div className="divide-y divide-border/60">
+                          {logs.map((log: any, idx: number) => (
+                            <div key={idx} className="py-2.5 text-xs space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-foreground text-[11px]">
+                                  {log.action_taken || "Action Recorded"}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10.5px]">
+                                <span className="text-muted-foreground font-mono">{log.previous_status}</span>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="font-bold font-mono text-primary">{log.new_status}</span>
+                                {log.template_sent && (
+                                  <Badge variant="outline" className="text-[9.5px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-500/20 font-mono">
+                                    {log.template_sent}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {log.timer_set && (
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  <Clock className="h-2.5 w-2.5 text-primary" />
+                                  <span>Timer: {log.timer_set}</span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </TabsContent>
           </div>
         </Tabs>
       </SheetContent>
+      {/* ── Rejection Feedback Dialog (Mandatory Constructive Feedback) ───────── */}
+      {feedbackPromptOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-xl space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-rose-500" />
+                <span>Rejection Feedback (Mandatory)</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setFeedbackPromptOpen(false);
+                  setRejectFeedback("");
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Every rejection email must include constructive feedback. You can provide specific notes below, or leave it blank to let the agent auto-generate polite feedback from the AI evaluation score.
+            </p>
+
+            <Textarea
+              placeholder="e.g. While your background in frontend engineering is commendable, we are prioritizing candidates with hands-on Kubernetes and distributed systems experience..."
+              value={rejectFeedback}
+              onChange={(e) => setRejectFeedback(e.target.value)}
+              className="text-xs min-h-[90px]"
+            />
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFeedbackPromptOpen(false);
+                  setRejectFeedback("");
+                }}
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={hrReviewMutation.isPending || interviewDecisionMutation.isPending}
+                onClick={() => {
+                  if (pendingAgentAction === "hr_review_reject") {
+                    hrReviewMutation.mutate({ decision: "reject", feedback: rejectFeedback });
+                  } else {
+                    interviewDecisionMutation.mutate({ decision: "reject", feedback: rejectFeedback });
+                  }
+                }}
+                className="text-xs font-semibold"
+              >
+                Confirm Rejection & Send Email
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {candidate && (
         <>
           <ScheduleInviteModal
