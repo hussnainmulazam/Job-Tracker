@@ -382,6 +382,26 @@ class OutreachService:
 
         raise HTTPException(status_code=500, detail="Failed to format updated draft.")
 
+    def skip_draft(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        message_id: uuid.UUID,
+    ) -> dict:
+        """HR skips/dismisses a draft message from the approval queue."""
+        msg = session.exec(
+            select(Message).where(
+                Message.id == message_id,
+                Message.user_id == user_id,
+                Message.hr_approved == False,
+            )
+        ).first()
+        if not msg:
+            raise HTTPException(status_code=404, detail="Draft message not found or already approved.")
+        session.delete(msg)
+        session.commit()
+        return {"status": "skipped", "message_id": str(message_id)}
+
     # ── 3. Approval & Dispatch ───────────────────────────────────────────────
 
     async def approve_and_send(
@@ -423,6 +443,43 @@ class OutreachService:
             action="outreach_approved",
             details=json.dumps({"message_id": str(msg.id), "channel": channel}),
         )
+
+        # Check agent pause state and daily send limit
+        from app.services.agent_settings_service import agent_settings_service
+        can_send, send_limit_reason = agent_settings_service.check_can_send(session, user_id)
+        if not can_send:
+            msg.status = MessageStatus.failed
+            msg.failed_at = now_utc
+            msg.error_message = send_limit_reason
+            session.add(msg)
+            session.commit()
+
+            audit_log_service.record(
+                session=session,
+                user_id=user_id,
+                candidate_id=candidate.id,
+                action="outreach_failed",
+                details=json.dumps({"message_id": str(msg.id), "status": "blocked", "reason": send_limit_reason}),
+            )
+            try:
+                agent_settings_service.notify_hr_instant(
+                    session=session,
+                    user_id=user_id,
+                    event_type="failure",
+                    candidate_name=candidate.name,
+                    details=f"Outreach send blocked: {send_limit_reason}",
+                )
+            except Exception as e:
+                logger.warning("Failed to notify HR of send failure: %s", e)
+
+            return ApproveResult(
+                message_id=msg.id,
+                candidate_id=candidate.id,
+                candidate_name=candidate.name,
+                channel=channel,
+                status="failed",
+                error=send_limit_reason,
+            )
 
         send_error: Optional[str] = None
         send_success = False
@@ -488,6 +545,17 @@ class OutreachService:
                     "error": send_error,
                 }),
             )
+
+            try:
+                agent_settings_service.notify_hr_instant(
+                    session=session,
+                    user_id=user_id,
+                    event_type="failure",
+                    candidate_name=candidate.name,
+                    details=f"Email outreach transmission error: {send_error or 'Unknown transmission error'}",
+                )
+            except Exception as e:
+                logger.warning("Failed to notify HR of outreach send failure: %s", e)
 
             return ApproveResult(
                 message_id=msg.id,

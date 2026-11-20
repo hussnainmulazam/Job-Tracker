@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import Column, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
@@ -25,6 +26,9 @@ class InterviewStatus(str, enum.Enum):
     rescheduled = "rescheduled"
     cancelled = "cancelled"
     completed = "completed"
+    passed = "passed"
+    failed = "failed"
+    no_show = "no_show"
 
 
 class SchedulingLinkStatus(str, enum.Enum):
@@ -121,6 +125,10 @@ class SchedulingLink(SQLModel, table=True):
         nullable=False,
     )
     slot_duration_minutes: int = Field(default=30, nullable=False)
+    round_type: str = Field(
+        default="initial",
+        sa_column=Column(sa.String(64), server_default="initial", nullable=False, index=True),
+    )
     status: SchedulingLinkStatus = Field(
         default=SchedulingLinkStatus.active,
         max_length=32,
@@ -195,6 +203,23 @@ class Interview(SQLModel, table=True):
     candidate_email: str = Field(max_length=255, nullable=False)
     candidate_phone: Optional[str] = Field(default=None, max_length=64, nullable=True)
     interviewer_email: str = Field(max_length=255, nullable=False)
+
+    round_type: str = Field(
+        default="initial",
+        sa_column=Column(sa.String(64), server_default="initial", nullable=False, index=True),
+    )
+    result_status: Optional[str] = Field(
+        default=None,
+        sa_column=Column(sa.String(32), nullable=True, index=True),
+    )
+    feedback: Optional[str] = Field(
+        default=None,
+        sa_column=Column(sa.Text, nullable=True),
+    )
+    result_recorded_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     status: InterviewStatus = Field(
         default=InterviewStatus.scheduled,

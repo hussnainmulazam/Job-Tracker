@@ -293,21 +293,19 @@ export function KanbanTable({
                             <Mail className="h-3.5 w-3.5" />
                           </Button>
                         )}
+
                         {onWhatsApp && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => onWhatsApp(cand)}
-                            className={`h-7 w-7 p-0 ${
-                              cand.phone
-                                ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                                : "text-muted-foreground/30 cursor-not-allowed"
-                            }`}
-                            title={cand.phone ? `WhatsApp (${cand.phone})` : "No phone number"}
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-emerald-500"
+                            title="Message on WhatsApp"
                           >
                             <MessageCircle className="h-3.5 w-3.5" />
                           </Button>
                         )}
+
                         {onSchedule && (
                           <Button
                             variant="ghost"

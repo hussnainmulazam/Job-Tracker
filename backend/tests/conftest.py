@@ -85,6 +85,7 @@ def session_fixture(engine) -> Generator[Session, None, None]:
 
     # Explicit row clean-up after each test to guarantee no lingering test data
     from app.models import (
+        AgentSettings,
         Application,
         AuditLog,
         AvailabilitySchedule,
@@ -105,6 +106,7 @@ def session_fixture(engine) -> Generator[Session, None, None]:
 
     with Session(engine) as cleanup_session:
         for model in [
+            AgentSettings,
             AuditLog,
             Notification,
             Interview,

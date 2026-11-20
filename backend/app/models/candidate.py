@@ -123,6 +123,35 @@ class Candidate(SQLModel, table=True):
         index=True,
     )
 
+    # CV Review Flow & Decision Status
+    review_status: str = Field(
+        default="pending",
+        sa_column=Column(sa.String(50), server_default="pending", nullable=False, index=True),
+        description="Review status: pending (Needs HR Review), approved, or rejected",
+    )
+    review_decision_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=True),
+        description="Timestamp when HR made the Approve / Reject decision",
+    )
+
+    # Offer Letter Lifecycle & HR Gatekeeper
+    offer_letter_draft: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(sa.JSON, nullable=True),
+        description="Drafted offer letter packet awaiting HR review and approval before sending",
+    )
+    offer_letter_status: Optional[str] = Field(
+        default=None,
+        sa_column=Column(sa.String(50), nullable=True),
+        description="Offer letter status: draft (pending approval), approved, or sent",
+    )
+    offer_letter_sent_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=True),
+        description="Timestamp when HR approved and sent the offer letter",
+    )
+
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         nullable=False,

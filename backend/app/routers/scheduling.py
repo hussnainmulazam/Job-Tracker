@@ -18,9 +18,15 @@ from app.models.interview import Interview, SchedulingLink
 from app.schemas.scheduling import (
     AvailabilityScheduleCreateOrUpdate,
     AvailabilityScheduleRead,
+    AvailabilityWeekPreviewResponse,
+    CalendarSyncResponse,
     InterviewCancelRequest,
     InterviewRead,
     InterviewRescheduleRequest,
+    InterviewResultRequest,
+    InterviewResultResponse,
+    OfferDraftResponse,
+    OfferSendRequest,
     PublicBookSlotRequest,
     PublicSchedulePageInfo,
     PublicSlotsResponse,
@@ -64,6 +70,38 @@ def update_recruiter_availability(
     return schedule
 
 
+@router.get(
+    "/availability/week-preview",
+    response_model=AvailabilityWeekPreviewResponse,
+    summary="Get unified 7-day schedule view with Google busy events, booked interviews, and free slots",
+)
+async def get_recruiter_availability_week_preview(
+    current_user: CurrentUser,
+    session: SessionDep,
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (defaults to current week Monday)"),
+) -> AvailabilityWeekPreviewResponse:
+    """Returns color-coded schedule preview: Google Busy, DB Booked Interviews, and Free Slots."""
+    return await scheduling_service.get_availability_week_preview(
+        session=session,
+        user_id=current_user.id,
+        start_date_str=start_date,
+    )
+
+
+@router.get(
+    "/booking-link",
+    response_model=SchedulingLinkRead,
+    summary="Get or generate recruiter's active public booking link for sharing and preview",
+)
+def get_recruiter_booking_link(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> SchedulingLinkRead:
+    """Returns active recruiter scheduling link for copying or candidate-view preview."""
+    return scheduling_service.get_or_create_recruiter_booking_link(session, current_user.id)
+
+
+
 # ── 2. Scheduling Links (Authenticated HR Flow) ───────────────────────────────
 
 @router.post(
@@ -82,7 +120,8 @@ def create_candidate_scheduling_link(
         session=session,
         user_id=current_user.id,
         candidate_id=payload.candidate_id,
-        slot_duration_minutes=payload.slot_duration_minutes or 30,
+        round_type=payload.round_type or "initial",
+        slot_duration_minutes=payload.slot_duration_minutes,
         validity_days=payload.validity_days or 7,
     )
     return link
@@ -265,6 +304,92 @@ async def hr_cancel_interview(
         cancelled_by="hr",
         user_id=current_user.id,
     )
+
+
+@router.post(
+    "/interviews/{interview_id}/result",
+    response_model=InterviewResultResponse,
+    summary="Record interview outcome (Passed, Failed, No-show) and trigger next lifecycle stage",
+)
+def record_interview_outcome(
+    interview_id: uuid.UUID,
+    payload: InterviewResultRequest,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> InterviewResultResponse:
+    """
+    Evaluates interview:
+      - Initial Passed: creates Behavioral link (45m) & sends invite
+      - Behavioral Passed: creates Final link (60m) & sends invite
+      - Final Passed: creates Offer Letter draft (does NOT send automatically)
+      - Failed: sends Rejection email & marks candidate rejected
+      - No-show: marks no-show without rejecting
+    """
+    return scheduling_service.record_interview_result(
+        session=session,
+        user_id=current_user.id,
+        interview_id=interview_id,
+        result_status=payload.result,
+        feedback=payload.feedback,
+    )
+
+
+@router.get(
+    "/offer-draft/{candidate_id}",
+    response_model=OfferDraftResponse,
+    summary="Get candidate's Offer Letter draft for HR review",
+)
+def get_candidate_offer_draft(
+    candidate_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> OfferDraftResponse:
+    """Retrieves or prepares the Offer Letter draft before HR approves and dispatches it."""
+    return scheduling_service.get_offer_draft(
+        session=session,
+        user_id=current_user.id,
+        candidate_id=candidate_id,
+    )
+
+
+@router.post(
+    "/offer-draft/{candidate_id}/send",
+    response_model=OfferDraftResponse,
+    summary="Approve & Send Offer Letter email to candidate",
+)
+def approve_and_send_offer_letter(
+    candidate_id: uuid.UUID,
+    payload: OfferSendRequest,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> OfferDraftResponse:
+    """
+    Strict security gate: HR explicitly approves and dispatches the Offer Letter.
+    Offer letters are never sent automatically.
+    """
+    return scheduling_service.approve_and_send_offer(
+        session=session,
+        user_id=current_user.id,
+        candidate_id=candidate_id,
+        payload=payload,
+    )
+
+
+@router.post(
+    "/sync-calendar",
+    response_model=CalendarSyncResponse,
+    summary="Sync interviews with connected Google Calendar events",
+)
+async def sync_google_calendar(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> CalendarSyncResponse:
+    """Reconciles interview sessions with Google Calendar events and updates statuses."""
+    result = await scheduling_service.sync_google_calendar_events(
+        session=session,
+        user_id=current_user.id,
+    )
+    return CalendarSyncResponse(**result)
 
 
 # ── 5. Reminder Background Job Trigger ────────────────────────────────────────

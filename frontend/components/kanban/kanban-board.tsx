@@ -232,7 +232,11 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
     } else {
       const overCandidate = candidates.find((c) => c.id === over.id);
       if (overCandidate) {
-        targetStage = overCandidate.stage;
+        if (["scheduled", "contacted", "interviewed"].includes(overCandidate.stage)) {
+          targetStage = "interview";
+        } else {
+          targetStage = overCandidate.stage;
+        }
       }
     }
 
@@ -252,17 +256,14 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
   }, []);
 
   const handleWhatsAppAction = useCallback((candidate: Candidate) => {
-    if (!candidate.phone) {
-      toast({
-        title: "No Phone Number",
-        description: `${candidate.name} has no phone number recorded.`,
-        variant: "destructive",
-      });
-      return;
+    if (candidate.phone) {
+      const cleanPhone = candidate.phone.replace(/[^0-9+]/g, "");
+      window.open(`https://wa.me/${cleanPhone.replace("+", "")}`, "_blank");
+    } else {
+      setContactCandidate(candidate);
+      setContactDialogOpen(true);
     }
-    const cleanPhone = candidate.phone.replace(/[^0-9]/g, "");
-    window.open(`https://wa.me/${cleanPhone}`, "_blank", "noopener,noreferrer");
-  }, [toast]);
+  }, []);
 
   const handleScheduleAction = useCallback((candidate: Candidate) => {
     setScheduleCandidate(candidate);
@@ -296,8 +297,14 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
       }
 
       // 2. Stage Filter
-      if (selectedStageFilter !== "all" && cand.stage !== selectedStageFilter) {
-        return false;
+      if (selectedStageFilter !== "all") {
+        if (selectedStageFilter === "interview") {
+          if (!["interview", "scheduled", "contacted", "interviewed"].includes(cand.stage)) {
+            return false;
+          }
+        } else if (cand.stage !== selectedStageFilter) {
+          return false;
+        }
       }
 
       // 3. Score Filter
@@ -687,7 +694,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
       {/* ── Main Pipeline Content Body ───────────────────────────────── */}
       <div className="flex-1 min-h-0">
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3.5 h-full">
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3.5 h-full">
             {PIPELINE_COLUMNS.map((col) => (
               <div
                 key={col.id}
@@ -741,15 +748,19 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3.5 h-full overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3.5 h-full overflow-hidden">
               {PIPELINE_COLUMNS.map((col) => {
                 if (mobileSelectedStage !== "all" && mobileSelectedStage !== col.id) {
                   return null;
                 }
 
-                const stageCandidates = filteredCandidates.filter(
-                  (c) => c.stage === col.id
-                );
+                const stageCandidates = filteredCandidates.filter((c) => {
+                  if (col.id === c.stage) return true;
+                  if (col.id === "interview" && ["scheduled", "contacted", "interviewed"].includes(c.stage)) {
+                    return true;
+                  }
+                  return false;
+                });
 
                 return (
                   <KanbanColumn

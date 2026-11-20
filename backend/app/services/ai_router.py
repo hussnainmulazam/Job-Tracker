@@ -161,14 +161,30 @@ def classify_error(exc: Exception) -> str:
 
 class AIRouter:
     """
-    OpenRouter Model Chain Orchestrator.
-    Manages fallback chains, reasoning extraction, JSON repair retry,
-    and daily quota lockouts.
+    Multi-Provider AI Orchestrator (Grok/Groq + OpenRouter fallback).
+    Manages high-speed inference, reasoning model token extraction,
+    schema repair retries, rate-limit backoff, and live model health probes.
     """
 
     def __init__(self) -> None:
         self.base_url = settings.OPENROUTER_BASE_URL
         self.timeout = settings.AI_TIMEOUT_SECONDS
+
+    def _get_grok_client(self) -> Optional[Tuple[AsyncOpenAI, str, List[str], str]]:
+        """
+        Returns (client, base_url, models, provider_name) if Grok / Groq is configured,
+        or None if not configured.
+        """
+        key = settings.grok_api_key
+        if not key or key.startswith("your_"):
+            return None
+        provider, base_url, models = settings.grok_provider_details
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=key,
+            timeout=self.timeout,
+        )
+        return client, base_url, models, provider
 
     def _get_client(self) -> AsyncOpenAI:
         api_key = (settings.OPENROUTER_API_KEY or "").strip()
@@ -176,8 +192,8 @@ class AIRouter:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
-                    "OpenRouter AI service is not configured. Please set a valid OPENROUTER_API_KEY "
-                    "in your backend/.env file (get a free key at https://openrouter.ai/keys)."
+                    "AI service is not configured. Please set GROK_API_KEY or OPENROUTER_API_KEY "
+                    "in your backend/.env file."
                 ),
             )
         return AsyncOpenAI(
@@ -196,7 +212,7 @@ class AIRouter:
         temperature: float = 0.2,
     ) -> Tuple[Any, str, float]:
         """
-        Execute request through the configured task model chain.
+        Execute request through Grok/Groq primary tier and OpenRouter fallback chains.
 
         Fallback triggers:
           - 429 per-minute limit (after 1-2s backoff)
@@ -209,10 +225,107 @@ class AIRouter:
           - If 429 indicates daily free-models limit, activates 1-hour lockout
             and raises friendly 429 error.
         """
-        client = self._get_client()
         call_timeout = timeout or self.timeout
 
-        # 1. Check daily lockout
+        # ── 1. PRIMARY TIER: Grok / Groq (High-Speed Inference) ─────────────────
+        grok_info = self._get_grok_client()
+        if grok_info:
+            grok_client, grok_base, grok_models, provider_name = grok_info
+            for g_model in grok_models:
+                t0 = time.perf_counter()
+                try:
+                    logger.info(
+                        "Executing AI task '%s' using %s model '%s'...",
+                        task_name,
+                        provider_name.upper(),
+                        g_model,
+                    )
+                    response = await grok_client.chat.completions.create(
+                        model=g_model,
+                        messages=messages,
+                        temperature=temperature,
+                        timeout=call_timeout,
+                    )
+                    if response.choices and response.choices[0].message:
+                        raw_content = response.choices[0].message.content or ""
+                        if raw_content.strip():
+                            # Plain text result (no schema)
+                            if validation_schema is None:
+                                cleaned_text = clean_reasoning_text(raw_content)
+                                latency = time.perf_counter() - t0
+                                logger.info(
+                                    "AI task '%s' succeeded on %s model '%s' in %.2fs",
+                                    task_name,
+                                    provider_name.upper(),
+                                    g_model,
+                                    latency,
+                                )
+                                return cleaned_text, f"{g_model} ({provider_name})", latency
+
+                            # Structured JSON result
+                            cleaned_json = clean_reasoning_and_extract_json(raw_content)
+                            try:
+                                data = json.loads(cleaned_json)
+                                validated = validation_schema.model_validate(data)
+                                latency = time.perf_counter() - t0
+                                logger.info(
+                                    "AI task '%s' succeeded on %s model '%s' in %.2fs",
+                                    task_name,
+                                    provider_name.upper(),
+                                    g_model,
+                                    latency,
+                                )
+                                return validated, f"{g_model} ({provider_name})", latency
+                            except Exception as parse_exc:
+                                logger.info(
+                                    "%s model '%s' output failed JSON/schema validation (%s). Retrying repair...",
+                                    provider_name.upper(),
+                                    g_model,
+                                    parse_exc,
+                                )
+                                repair_messages = list(messages) + [
+                                    {"role": "assistant", "content": raw_content},
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            f"Your previous response was invalid JSON or did not match schema: {parse_exc}\n"
+                                            "Please output ONLY a valid JSON object strictly matching the required schema, "
+                                            "with NO markdown fences and NO explanation."
+                                        ),
+                                    },
+                                ]
+                                rep = await grok_client.chat.completions.create(
+                                    model=g_model,
+                                    messages=repair_messages,
+                                    temperature=0.0,
+                                    timeout=call_timeout,
+                                )
+                                if rep.choices and rep.choices[0].message:
+                                    rep_content = rep.choices[0].message.content or ""
+                                    rep_json = clean_reasoning_and_extract_json(rep_content)
+                                    val = validation_schema.model_validate(json.loads(rep_json))
+                                    latency = time.perf_counter() - t0
+                                    logger.info(
+                                        "Repair retry succeeded on %s model '%s' in %.2fs",
+                                        provider_name.upper(),
+                                        g_model,
+                                        latency,
+                                    )
+                                    return val, f"{g_model} ({provider_name})", latency
+                except Exception as g_exc:
+                    latency = time.perf_counter() - t0
+                    logger.warning(
+                        "%s model '%s' failed for task '%s' [latency=%.2fs]: %s. Falling back.",
+                        provider_name.upper(),
+                        g_model,
+                        task_name,
+                        latency,
+                        g_exc,
+                    )
+                    # Continue to next Grok model or OpenRouter fallback
+
+        # ── 2. SECONDARY TIER: OpenRouter Fallback Chain ─────────────────────────
+        # Check daily lockout
         if is_daily_limit_locked():
             remaining = get_daily_limit_lockout_remaining()
             logger.warning(
@@ -225,7 +338,9 @@ class AIRouter:
                 detail="AI free limit reached for today. Try again later.",
             )
 
-        # 2. Resolve model chain
+        client = self._get_client()
+
+        # Resolve model chain
         chain = models or settings.get_models_for_task(task_name)
         if not chain:
             raise HTTPException(
@@ -235,7 +350,7 @@ class AIRouter:
 
         chain_errors: List[Tuple[str, str, str, float]] = []
 
-        # 3. Iterate through chain
+        # Iterate through chain
         for model in chain:
             t0 = time.perf_counter()
             try:
@@ -355,75 +470,141 @@ class AIRouter:
 
     async def check_health(self) -> AIModelsHealthResponse:
         """
-        Send a tiny JSON prompt to every configured model in parallel or sequence,
-        measuring round-trip latency, status (ok/fail), and error classification.
+        Probe status and round-trip latency of configured AI models (Grok/Groq and OpenRouter).
         """
-        api_key = (settings.OPENROUTER_API_KEY or "").strip()
-        if not api_key or api_key.startswith("your_"):
-            return AIModelsHealthResponse(
-                status="unconfigured",
-                openrouter_base_url=self.base_url,
-                models={},
-            )
-
-        client = self._get_client()
-
-        # Map each unique model to the task categories using it
-        all_tasks = ["screening", "extraction", "questions", "drafts", "vision"]
-        model_task_map: Dict[str, List[str]] = {}
-        for t in all_tasks:
-            for m in settings.get_models_for_task(t):
-                model_task_map.setdefault(m, []).append(t)
-
-        results: Dict[str, ModelHealthItem] = {}
         tiny_messages = [
             {"role": "system", "content": "You are an automated health check ping. Output raw JSON only."},
             {"role": "user", "content": 'Respond with JSON: {"status": "ok"}'},
         ]
 
-        for model_id, task_names in model_task_map.items():
-            primary_task = ", ".join(task_names)
+        results: Dict[str, ModelHealthItem] = {}
+        active_provider = "unconfigured"
+        coros = []
+
+        async def _probe_grok_model(g_model: str, prov_name: str, client_inst) -> Tuple[str, ModelHealthItem]:
             t0 = time.perf_counter()
             try:
-                resp = await client.chat.completions.create(
-                    model=model_id,
+                resp = await client_inst.chat.completions.create(
+                    model=g_model,
                     messages=tiny_messages,
                     temperature=0.0,
-                    timeout=15.0,
+                    timeout=5.0,
                 )
                 dt_ms = (time.perf_counter() - t0) * 1000
                 raw = resp.choices[0].message.content or ""
                 cleaned = clean_reasoning_and_extract_json(raw)
-
-                if "ok" in cleaned.lower():
-                    results[model_id] = ModelHealthItem(
-                        task=primary_task,
-                        model=model_id,
+                if "ok" in cleaned.lower() or "ok" in raw.lower():
+                    return f"{g_model} ({prov_name.upper()})", ModelHealthItem(
+                        task="Primary Inference",
+                        model=g_model,
                         status="ok",
                         latency_ms=round(dt_ms, 1),
                         error=None,
                         error_type=None,
                     )
-                else:
-                    results[model_id] = ModelHealthItem(
-                        task=primary_task,
-                        model=model_id,
-                        status="fail",
-                        latency_ms=round(dt_ms, 1),
-                        error="Unexpected response format",
-                        error_type="invalid_response",
-                    )
+                return f"{g_model} ({prov_name.upper()})", ModelHealthItem(
+                    task="Primary Inference",
+                    model=g_model,
+                    status="fail",
+                    latency_ms=round(dt_ms, 1),
+                    error="Unexpected response format",
+                    error_type="invalid_response",
+                )
             except Exception as exc:
                 dt_ms = (time.perf_counter() - t0) * 1000
                 err_type = classify_error(exc)
-                results[model_id] = ModelHealthItem(
-                    task=primary_task,
-                    model=model_id,
+                return f"{g_model} ({prov_name.upper()})", ModelHealthItem(
+                    task="Primary Inference",
+                    model=g_model,
                     status="fail",
                     latency_ms=round(dt_ms, 1),
                     error=str(exc)[:150],
                     error_type=err_type,
                 )
+
+        async def _probe_openrouter_model(m_id: str, p_task: str, client_inst) -> Tuple[str, ModelHealthItem]:
+            t0 = time.perf_counter()
+            try:
+                resp = await client_inst.chat.completions.create(
+                    model=m_id,
+                    messages=tiny_messages,
+                    temperature=0.0,
+                    timeout=5.0,
+                )
+                dt_ms = (time.perf_counter() - t0) * 1000
+                raw = resp.choices[0].message.content or ""
+                cleaned = clean_reasoning_and_extract_json(raw)
+                if "ok" in cleaned.lower() or "ok" in raw.lower():
+                    return m_id, ModelHealthItem(
+                        task=p_task,
+                        model=m_id,
+                        status="ok",
+                        latency_ms=round(dt_ms, 1),
+                        error=None,
+                        error_type=None,
+                    )
+                return m_id, ModelHealthItem(
+                    task=p_task,
+                    model=m_id,
+                    status="fail",
+                    latency_ms=round(dt_ms, 1),
+                    error="Unexpected response format",
+                    error_type="invalid_response",
+                )
+            except Exception as exc:
+                dt_ms = (time.perf_counter() - t0) * 1000
+                err_type = classify_error(exc)
+                return m_id, ModelHealthItem(
+                    task=p_task,
+                    model=m_id,
+                    status="fail",
+                    latency_ms=round(dt_ms, 1),
+                    error=str(exc)[:150],
+                    error_type=err_type,
+                )
+
+        # ── 1. Queue Grok / Groq probes ───────────────────────────────────────
+        grok_info = self._get_grok_client()
+        grok_base_url: Optional[str] = None
+        if grok_info:
+            grok_client, grok_base, grok_models, provider_name = grok_info
+            grok_base_url = grok_base
+            active_provider = provider_name
+            for g_model in grok_models[:2]:
+                coros.append(_probe_grok_model(g_model, provider_name, grok_client))
+
+        # ── 2. Queue OpenRouter probes ───────────────────────────────────────
+        openrouter_key = (settings.OPENROUTER_API_KEY or "").strip()
+        if openrouter_key and not openrouter_key.startswith("your_"):
+            if active_provider == "unconfigured":
+                active_provider = "openrouter"
+            client = self._get_client()
+            all_tasks = ["screening", "extraction", "questions", "drafts", "vision"]
+            model_task_map: Dict[str, List[str]] = {}
+            for t in all_tasks:
+                for m in settings.get_models_for_task(t):
+                    model_task_map.setdefault(m, []).append(t)
+
+            for model_id, task_names in model_task_map.items():
+                primary_task = ", ".join(task_names)
+                coros.append(_probe_openrouter_model(model_id, primary_task, client))
+
+        # Run all model checks concurrently in parallel for sub-2s response
+        if coros:
+            probed = await asyncio.gather(*coros, return_exceptions=True)
+            for item in probed:
+                if isinstance(item, tuple) and len(item) == 2:
+                    k, v = item
+                    results[k] = v
+
+        if not results:
+            return AIModelsHealthResponse(
+                status="unconfigured",
+                openrouter_base_url=self.base_url,
+                grok_base_url=grok_base_url,
+                active_provider="unconfigured",
+                models={},
+            )
 
         all_ok = all(item.status == "ok" for item in results.values())
         any_ok = any(item.status == "ok" for item in results.values())
@@ -438,6 +619,8 @@ class AIRouter:
         return AIModelsHealthResponse(
             status=overall,
             openrouter_base_url=self.base_url,
+            grok_base_url=grok_base_url,
+            active_provider=active_provider,
             models=results,
         )
 

@@ -18,8 +18,8 @@ export default function PipelinePage() {
     <AppShell title="Candidate Pipeline">
       <Suspense
         fallback={
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 h-96">
-            {[1, 2, 3, 4, 5].map((i) => (
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 h-96">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
               <Skeleton key={i} className="h-full rounded-2xl" />
             ))}
           </div>

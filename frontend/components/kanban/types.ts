@@ -27,6 +27,14 @@ export const PIPELINE_COLUMNS: {
     textColor: "text-purple-600 dark:text-purple-400",
   },
   {
+    id: "shortlisted",
+    title: "Shortlisted",
+    accentColor: "border-cyan-500/20",
+    headerBg: "bg-cyan-500/10",
+    dotColor: "bg-cyan-500",
+    textColor: "text-cyan-600 dark:text-cyan-400",
+  },
+  {
     id: "interview",
     title: "Interview",
     accentColor: "border-amber-500/20",

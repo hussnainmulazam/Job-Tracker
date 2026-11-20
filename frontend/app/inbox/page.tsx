@@ -49,7 +49,7 @@ import {
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
 import { ScheduleInviteModal } from "@/components/scheduling/schedule-invite-modal";
 
-type FilterTab = "all" | "unread" | "awaiting_reply" | "email" | "whatsapp";
+type FilterTab = "all" | "unread" | "awaiting_reply";
 
 interface TemplateOption {
   id: string;
@@ -128,6 +128,7 @@ function InboxContent() {
     queryKey: ["email-conversations", filterTab],
     queryFn: () => googleApi.listConversations(filterTab),
     refetchInterval: 10000,
+    retry: 1,
   });
 
   const conversations = conversationsData?.conversations || [];
@@ -160,6 +161,7 @@ function InboxContent() {
     queryFn: () => (selectedCandidateId ? googleApi.getThread(selectedCandidateId) : Promise.reject("No candidate")),
     enabled: !!selectedCandidateId,
     refetchInterval: 6000,
+    retry: 1,
   });
 
   const selectedConv = conversations.find((c) => c.candidate_id === selectedCandidateId);
@@ -342,9 +344,7 @@ function InboxContent() {
                 [
                   { id: "all", label: "All" },
                   { id: "unread", label: "Unread", count: unreadTotal },
-                  { id: "awaiting_reply", label: "Awaiting", count: awaitingReplyCount },
-                  { id: "email", label: "Email" },
-                  { id: "whatsapp", label: "WhatsApp" },
+                  { id: "awaiting_reply", label: "Awaiting Reply", count: awaitingReplyCount },
                 ] as const
               ).map((tab) => (
                 <button
@@ -411,7 +411,6 @@ function InboxContent() {
               filteredConversations.map((conv) => {
                 const isSelected = conv.candidate_id === selectedCandidateId;
                 const isAwaiting = conv.last_message_direction === "inbound";
-                const isWhatsApp = conv.last_message_type === "whatsapp";
 
                 return (
                   <button
@@ -429,16 +428,10 @@ function InboxContent() {
                         {conv.candidate_name ? conv.candidate_name.charAt(0).toUpperCase() : "C"}
                       </div>
                       <div
-                        className={`absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border border-background flex items-center justify-center text-[8px] ${
-                          isWhatsApp ? "bg-emerald-500 text-white" : "bg-blue-500 text-white"
-                        }`}
-                        title={isWhatsApp ? "WhatsApp Message" : "Gmail Message"}
+                        className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border border-background bg-blue-500 text-white flex items-center justify-center text-[8px]"
+                        title="Gmail Message"
                       >
-                        {isWhatsApp ? (
-                          <MessageCircle className="h-2 w-2" />
-                        ) : (
-                          <Mail className="h-2 w-2" />
-                        )}
+                        <Mail className="h-2 w-2" />
                       </div>
                     </div>
 
@@ -596,7 +589,6 @@ function InboxContent() {
                 ) : (
                   threadData.messages.map((msg) => {
                     const isInbound = msg.direction === "inbound";
-                    const isWhatsApp = msg.message_type === "whatsapp";
 
                     return (
                       <div
@@ -611,15 +603,9 @@ function InboxContent() {
                             {isInbound ? threadData.candidate_name : "You (Recruiter)"}
                           </span>
                           <span className="flex items-center gap-0.5">
-                            {isWhatsApp ? (
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                                WhatsApp
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-blue-500/10 text-blue-600 border-blue-500/20">
-                                Gmail
-                              </Badge>
-                            )}
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 bg-blue-500/10 text-blue-600 border-blue-500/20">
+                              Gmail
+                            </Badge>
                           </span>
                           <span>•</span>
                           <span>{formatDateTime(msg.sent_at || msg.created_at)}</span>

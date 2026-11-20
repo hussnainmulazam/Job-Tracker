@@ -27,6 +27,12 @@ class JobOpeningBase(BaseModel):
         default=JobOpeningStatus.active,
         description="Posting status",
     )
+    pass_mark: int = Field(
+        default=80,
+        ge=1,
+        le=100,
+        description="Minimum score required for recommendation (default 80)",
+    )
 
 
 class JobOpeningCreate(BaseModel):
@@ -39,6 +45,7 @@ class JobOpeningCreate(BaseModel):
     years_of_experience: Optional[float] = Field(default=None)
     nice_to_haves: Optional[List[str]] = Field(default=None)
     status: JobOpeningStatus = Field(default=JobOpeningStatus.active)
+    pass_mark: Optional[int] = Field(default=80, ge=1, le=100)
 
 
 class JobOpeningUpdate(BaseModel):
@@ -48,6 +55,7 @@ class JobOpeningUpdate(BaseModel):
     years_of_experience: Optional[float] = None
     nice_to_haves: Optional[List[str]] = None
     status: Optional[JobOpeningStatus] = None
+    pass_mark: Optional[int] = Field(default=None, ge=1, le=100)
 
 
 class JobOpeningRead(JobOpeningBase):

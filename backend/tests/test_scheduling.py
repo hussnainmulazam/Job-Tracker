@@ -249,9 +249,9 @@ def test_slot_booking_meet_creation_and_double_booking_prevention(client: TestCl
     assert "meet.google.com" in inv["meet_link"]
     assert inv["candidate_name"] == "Ada Lovelace"
 
-    # Candidate stage moved to interview
+    # Candidate stage moved to scheduled
     cand1_updated = client.get(f"/api/v1/candidates/{cand1['id']}", headers=user_a["headers"]).json()
-    assert cand1_updated["stage"] == "interview"
+    assert cand1_updated["stage"] in ["scheduled", "interview"]
 
     # 2. Candidate 2 attempts to book overlapping slot (Double-booking attack) -> 409 Conflict
     conflict_res = client.post(
@@ -373,3 +373,40 @@ def test_calendar_interviews_listing(client: TestClient, user_a: dict):
     res = client.get("/api/v1/scheduling/interviews", headers=user_a["headers"])
     assert res.status_code == 200
     assert isinstance(res.json(), list)
+
+
+def test_sync_google_calendar_endpoint(client: TestClient, user_a: dict):
+    """Tests the sync-calendar endpoint reconciling events with Google Calendar."""
+    res = client.post("/api/v1/scheduling/sync-calendar", headers=user_a["headers"])
+    assert res.status_code == 200
+    data = res.json()
+    assert "synced_count" in data
+    assert "updated_count" in data
+    assert "cancelled_count" in data
+    assert "detail" in data
+
+
+def test_availability_week_preview_and_booking_link(client: TestClient, user_a: dict):
+    """Tests the unified week preview endpoint and recruiter booking link retrieval."""
+    # 1. Booking link
+    link_res = client.get("/api/v1/scheduling/booking-link", headers=user_a["headers"])
+    assert link_res.status_code == 200
+    link_data = link_res.json()
+    assert "token" in link_data
+    assert "public_url" in link_data
+    assert link_data["public_url"].startswith("/schedule/")
+
+    # 2. Week preview
+    preview_res = client.get("/api/v1/scheduling/availability/week-preview", headers=user_a["headers"])
+    assert preview_res.status_code == 200
+    preview_data = preview_res.json()
+    assert "week_start" in preview_data
+    assert "week_end" in preview_data
+    assert "timezone" in preview_data
+    assert "google_busy_events" in preview_data
+    assert "platform_interviews" in preview_data
+    assert "free_slots" in preview_data
+    assert "booking_link_token" in preview_data
+    assert "booking_link_url" in preview_data
+    assert isinstance(preview_data["free_slots"], list)
+

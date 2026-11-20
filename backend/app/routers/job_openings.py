@@ -90,7 +90,7 @@ def list_job_openings(
     status_filter: Optional[JobOpeningStatus] = Query(default=None, alias="status"),
     search: Optional[str] = Query(default=None),
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=500),
 ) -> PaginatedJobOpenings:
     """List all job openings created by the authenticated recruiter."""
     return job_opening_service.list(

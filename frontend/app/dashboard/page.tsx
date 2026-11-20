@@ -21,11 +21,15 @@ import {
   candidatesApi,
   jobOpeningsApi,
   googleApi,
+  onboardingApi,
   apiFetch,
   Candidate,
+  OnboardingStatusResponse,
 } from "@/lib/api";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/ui/page-header";
+import { SetupChecklist } from "@/components/dashboard/setup-checklist";
+import { SetupWizardDialog } from "@/components/setup/setup-wizard-dialog";
 import { StatsHeader } from "@/components/dashboard/stats-header";
 import { HiringFunnelChart } from "@/components/dashboard/hiring-funnel-chart";
 import { ApplicationsTimelineChart } from "@/components/dashboard/applications-timeline-chart";
@@ -50,6 +54,40 @@ export default function DashboardPage() {
   const [createOpeningOpen, setCreateOpeningOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Setup Wizard State
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
+
+  // 0. Fetch Onboarding / Setup Wizard Status
+  const {
+    data: onboarding,
+    isLoading: isOnboardingLoading,
+    refetch: refetchOnboarding,
+  } = useQuery<OnboardingStatusResponse>({
+    queryKey: ["onboarding-status"],
+    queryFn: () => onboardingApi.getStatus(),
+  });
+
+  // Start Agent Mutation
+  const startAgentMutation = useMutation({
+    mutationFn: () => onboardingApi.startAgent(),
+    onSuccess: (res) => {
+      refetchOnboarding();
+      refetch();
+      toast({
+        title: "🎉 Recruiter AI Copilot Activated!",
+        description: res.message || "Your autonomous agent is now online and monitoring your pipeline.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Cannot Start Agent",
+        description: err.message || "All four setup checklist steps must be completed first.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // 1. Fetch current user identity for greeting
   const { data: user } = useQuery<UserProfile>({
@@ -168,6 +206,18 @@ export default function DashboardPage() {
           />
         )}
 
+        {/* ── 0. Recruiter Setup Wizard Progress Checklist ────────────────────── */}
+        <SetupChecklist
+          onboarding={onboarding}
+          isLoading={isOnboardingLoading}
+          onResumeSetup={(step) => {
+            setWizardStep(step || onboarding?.current_step || 1);
+            setWizardOpen(true);
+          }}
+          onStartAgent={() => startAgentMutation.mutate()}
+          isStartingAgent={startAgentMutation.isPending}
+        />
+
         {/* ── 1. Top Greeting, Today's Priorities & KPI Cards with Trend ───────── */}
         <StatsHeader
           stats={stats}
@@ -274,6 +324,18 @@ export default function DashboardPage() {
         onClose={() => {
           setDrawerOpen(false);
           setSelectedCandidate(null);
+        }}
+      />
+
+      {/* ── Recruiter Setup Wizard Modal ───────────────────────────────── */}
+      <SetupWizardDialog
+        open={wizardOpen}
+        initialStep={wizardStep}
+        onboardingData={onboarding}
+        onClose={() => setWizardOpen(false)}
+        onSuccess={() => {
+          refetchOnboarding();
+          refetch();
         }}
       />
     </AppShell>

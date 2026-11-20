@@ -27,12 +27,21 @@ from app.models.interview import (
     SchedulingLink,
     SchedulingLinkStatus,
 )
-from app.models.job_opening import JobOpening
+from app.models.job_opening import JobOpening, JobOpeningStatus
+from app.models.message import Message, MessageDirection, MessageStatus, MessageType
+from app.models.onboarding import OnboardingSetup
 from app.models.user import User
 from app.schemas.scheduling import (
     AvailabilityScheduleCreateOrUpdate,
     AvailabilityScheduleRead,
+    AvailabilityWeekPreviewResponse,
+    CalendarBookedInterview,
+    CalendarBusyEvent,
+    CalendarFreeSlot,
     InterviewRead,
+    InterviewResultResponse,
+    OfferDraftResponse,
+    OfferSendRequest,
     PublicSchedulePageInfo,
     PublicSlotsResponse,
     ReminderProcessResult,
@@ -40,7 +49,9 @@ from app.schemas.scheduling import (
     TimeSlot,
     WorkingBlock,
 )
+from app.services.audit_log_service import audit_log_service
 from app.services.google_service import GoogleService
+from app.services.template_service import fill_template_variables, get_default_templates
 from app.schemas.google import GoogleSendEmailRequest
 
 logger = logging.getLogger(__name__)
@@ -142,17 +153,54 @@ class SchedulingService:
 
     # ── 2. Scheduling Links ───────────────────────────────────────────────────
 
+    def get_round_duration(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        round_type: str,
+    ) -> int:
+        """
+        Returns slot duration in minutes for a given interview round:
+        - initial: default 30 min
+        - behavioral: default 45 min
+        - final: default 60 min
+        Respects custom configured round durations in OnboardingSetup if available.
+        """
+        round_type_normalized = (round_type or "initial").lower().strip()
+        default_durations = {
+            "initial": 30,
+            "behavioral": 45,
+            "final": 60,
+        }
+        try:
+            onboarding = session.exec(
+                select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)
+            ).first()
+            if onboarding and onboarding.interview_rounds:
+                for round_item in onboarding.interview_rounds:
+                    name = str(round_item.get("round_name", "")).lower()
+                    dur = round_item.get("duration_minutes")
+                    if dur and isinstance(dur, (int, float)) and dur > 0:
+                        if round_type_normalized in name or (round_type_normalized == "behavioral" and "technical" in name):
+                            return int(dur)
+        except Exception as exc:
+            logger.warning("Could not lookup custom round duration: %s", exc)
+
+        return default_durations.get(round_type_normalized, 30)
+
     def create_scheduling_link(
         self,
         session: Session,
         user_id: uuid.UUID,
         candidate_id: uuid.UUID,
-        slot_duration_minutes: int = 30,
+        round_type: str = "initial",
+        slot_duration_minutes: Optional[int] = None,
         validity_days: int = 7,
     ) -> SchedulingLinkRead:
         """
         Generates a tokenized public booking link for a candidate.
         Token is unique and expires in validity_days (default 7 days).
+        Duration defaults to the round's duration (initial 30m, behavioral 45m, final 60m).
         """
         candidate = session.exec(
             select(Candidate).where(
@@ -169,6 +217,7 @@ class SchedulingService:
         if not opening:
             raise HTTPException(status_code=404, detail="Job opening not found.")
 
+        effective_duration = slot_duration_minutes or self.get_round_duration(session, user_id, round_type)
         token = secrets.token_urlsafe(24)
         expires_at = datetime.now(timezone.utc) + timedelta(days=validity_days)
 
@@ -177,7 +226,8 @@ class SchedulingService:
             user_id=user_id,
             candidate_id=candidate.id,
             opening_id=opening.id,
-            slot_duration_minutes=slot_duration_minutes,
+            round_type=round_type,
+            slot_duration_minutes=effective_duration,
             status=SchedulingLinkStatus.active,
             expires_at=expires_at,
         )
@@ -194,6 +244,7 @@ class SchedulingService:
             candidate_email=candidate.email,
             opening_id=link.opening_id,
             opening_title=opening.title,
+            round_type=link.round_type or "initial",
             slot_duration_minutes=link.slot_duration_minutes,
             status=link.status.value if hasattr(link.status, "value") else str(link.status),
             expires_at=ensure_utc(link.expires_at),
@@ -255,6 +306,7 @@ class SchedulingService:
             candidate_email=candidate.email if candidate else "",
             candidate_phone=candidate.phone if candidate else None,
             opening_title=opening.title if opening else "Position",
+            round_type=getattr(link, "round_type", "initial") or "initial",
             slot_duration_minutes=link.slot_duration_minutes,
             default_timezone=default_tz,
             interviewer_email=recruiter.email if recruiter else "recruiter@company.com",
@@ -713,12 +765,20 @@ class SchedulingService:
             )
 
         # ── Create Google Calendar event with Google Meet ─────────────────────
-        summary = f"Interview: {candidate.name} - {opening.title}"
+        link_round = getattr(link, "round_type", "initial") or "initial"
+        round_name_map = {
+            "initial": "Initial Interview",
+            "behavioral": "Behavioral Interview",
+            "final": "Final Interview",
+        }
+        round_display = round_name_map.get(link_round.lower(), "Interview")
+        summary = f"{round_display}: {candidate.name} - {opening.title}"
         description = (
-            f"AI Candidate Screening Copilot Interview\n\n"
+            f"AI Candidate Screening Copilot Interview ({round_display})\n\n"
             f"Candidate: {candidate.name}\n"
             f"Email: {candidate.email}\n"
             f"Position: {opening.title}\n"
+            f"Round: {round_display} ({link.slot_duration_minutes} minutes)\n"
             f"Recruiter: {recruiter.email}\n"
             f"Notes: {notes or 'None'}"
         )
@@ -739,6 +799,7 @@ class SchedulingService:
             candidate_id=candidate.id,
             opening_id=opening.id,
             scheduling_link_id=link.id,
+            round_type=link_round,
             title=summary,
             start_time=start_time_utc,
             end_time=end_time_utc,
@@ -798,6 +859,20 @@ class SchedulingService:
             opening=opening,
             event_type="confirmation",
         )
+
+        # ── Notify HR immediately by email ────────────────────────────────────
+        try:
+            from app.services.agent_settings_service import agent_settings_service
+            agent_settings_service.notify_hr_instant(
+                session=session,
+                user_id=link.user_id,
+                event_type="booking",
+                candidate_name=candidate.name,
+                opening_title=opening.title,
+                details=f"Slot booked for {start_time_utc.strftime('%A, %b %d at %I:%M %p UTC')} ({link.slot_duration_minutes}m). Google Meet: {meet_link}",
+            )
+        except Exception as alert_err:
+            logger.warning("Could not dispatch instant HR booking alert: %s", alert_err)
 
         return self._to_interview_read(interview, candidate, opening)
 
@@ -1143,6 +1218,409 @@ class SchedulingService:
             results.append(self._to_interview_read(inv))
         return results
 
+    async def sync_google_calendar_events(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+    ) -> dict:
+        """
+        Reconciles interviews with Google Calendar:
+        1. Checks status of existing Google Calendar events for the user's interviews.
+        2. Detects if an event was cancelled or deleted on Google Calendar.
+        3. If any scheduled interview is missing a Google Calendar event and Google is connected, creates it.
+        4. Automatically advances past interviews to completed stage.
+        """
+        from app.models.google_account import GoogleAccount
+        from app.services.google_service import GoogleService
+
+        account = session.exec(select(GoogleAccount).where(GoogleAccount.user_id == user_id)).first()
+        interviews = session.exec(
+            select(Interview).where(Interview.user_id == user_id)
+        ).all()
+
+        synced_count = 0
+        updated_count = 0
+        cancelled_count = 0
+        now_utc = datetime.now(timezone.utc)
+
+        google_service = GoogleService(session)
+        access_token = None
+        if account:
+            try:
+                tok = google_service.get_valid_access_token(account)
+                if tok and not tok.startswith("simulated_"):
+                    access_token = tok
+            except Exception:
+                access_token = None
+
+        for inv in interviews:
+            synced_count += 1
+            inv_end = ensure_utc(inv.end_time)
+
+            # 1. Advance past interviews to completed if still scheduled
+            if inv_end and inv_end < now_utc and inv.status == InterviewStatus.scheduled:
+                inv.status = InterviewStatus.completed
+                inv.updated_at = now_utc
+                session.add(inv)
+                updated_count += 1
+                continue
+
+            # 2. Check remote Google Calendar event if connected
+            if access_token and inv.google_calendar_event_id and not inv.google_calendar_event_id.startswith("cal_evt_"):
+                try:
+                    headers = {"Authorization": f"Bearer {access_token}"}
+                    url = f"{GOOGLE_CALENDAR_API_BASE}/calendars/primary/events/{inv.google_calendar_event_id}"
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.get(url, headers=headers)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if data.get("status") == "cancelled" and inv.status != InterviewStatus.cancelled:
+                                inv.status = InterviewStatus.cancelled
+                                inv.cancellation_reason = "Cancelled in Google Calendar"
+                                inv.cancelled_at = now_utc
+                                session.add(inv)
+                                cancelled_count += 1
+                            else:
+                                hangout_link = data.get("hangoutLink") or data.get("conferenceData", {}).get("entryPoints", [{}])[0].get("uri")
+                                if hangout_link and inv.meet_link != hangout_link:
+                                    inv.meet_link = hangout_link
+                                    session.add(inv)
+                                    updated_count += 1
+                        elif resp.status_code == 404 and inv.status != InterviewStatus.cancelled:
+                            inv.status = InterviewStatus.cancelled
+                            inv.cancellation_reason = "Deleted from Google Calendar"
+                            inv.cancelled_at = now_utc
+                            session.add(inv)
+                            cancelled_count += 1
+                except Exception as g_err:
+                    logger.warning("Error syncing event %s from Google Calendar: %s", inv.google_calendar_event_id, g_err)
+
+            # 3. Create missing Google Calendar event if Google account is connected
+            elif access_token and inv.status == InterviewStatus.scheduled and (not inv.google_calendar_event_id or inv.google_calendar_event_id.startswith("cal_evt_")):
+                try:
+                    summary = f"Interview: {inv.candidate_name} - {inv.title}"
+                    desc = f"Interview with {inv.candidate_name} ({inv.candidate_email}) via TalentFlow."
+                    cal_id, meet_link = await self.create_google_calendar_event(
+                        session=session,
+                        user_id=user_id,
+                        summary=summary,
+                        description=desc,
+                        start_time_utc=ensure_utc(inv.start_time),
+                        end_time_utc=ensure_utc(inv.end_time),
+                        candidate_email=inv.candidate_email,
+                        recruiter_email=inv.interviewer_email,
+                    )
+                    if cal_id and not cal_id.startswith("cal_evt_"):
+                        inv.google_calendar_event_id = cal_id
+                    if meet_link:
+                        inv.meet_link = meet_link
+                    session.add(inv)
+                    updated_count += 1
+                except Exception as c_err:
+                    logger.warning("Error creating calendar event for interview %s: %s", inv.id, c_err)
+
+        session.commit()
+        detail_msg = f"Synced {synced_count} interviews with Google Calendar ({updated_count} updated, {cancelled_count} cancelled)."
+        return {
+            "synced_count": synced_count,
+            "updated_count": updated_count,
+            "cancelled_count": cancelled_count,
+            "detail": detail_msg,
+        }
+
+    def get_or_create_recruiter_booking_link(
+        self, session: Session, user_id: uuid.UUID
+    ) -> SchedulingLinkRead:
+        """
+        Finds the most recent active candidate scheduling link for this recruiter,
+        or creates a standard preview/booking link valid for 30 days.
+        """
+        now_utc = datetime.now(timezone.utc)
+        link = session.exec(
+            select(SchedulingLink)
+            .where(
+                SchedulingLink.user_id == user_id,
+                SchedulingLink.status == SchedulingLinkStatus.active,
+                SchedulingLink.expires_at > now_utc,
+            )
+            .order_by(SchedulingLink.created_at.desc())
+        ).first()
+
+        if link:
+            cand = session.exec(select(Candidate).where(Candidate.id == link.candidate_id)).first()
+            op = session.exec(select(JobOpening).where(JobOpening.id == link.opening_id)).first()
+            return SchedulingLinkRead(
+                id=link.id,
+                token=link.token,
+                user_id=link.user_id,
+                candidate_id=link.candidate_id,
+                candidate_name=cand.name if cand else "Candidate",
+                candidate_email=cand.email if cand else "",
+                opening_id=link.opening_id,
+                opening_title=op.title if op else "Interview",
+                slot_duration_minutes=link.slot_duration_minutes,
+                status=link.status.value if hasattr(link.status, "value") else str(link.status),
+                expires_at=ensure_utc(link.expires_at),
+                public_url=f"/schedule/{link.token}",
+                created_at=ensure_utc(link.created_at),
+            )
+
+        # If no active link exists, find an existing candidate
+        candidate = session.exec(
+            select(Candidate).where(Candidate.user_id == user_id).order_by(Candidate.created_at.desc())
+        ).first()
+
+        if not candidate:
+            opening = session.exec(
+                select(JobOpening).where(JobOpening.user_id == user_id)
+            ).first()
+            if not opening:
+                opening = JobOpening(
+                    user_id=user_id,
+                    title="General Interview",
+                    description="Standard candidate screening and interview opening.",
+                    status=JobOpeningStatus.active,
+                )
+                session.add(opening)
+                session.commit()
+                session.refresh(opening)
+
+            candidate = Candidate(
+                user_id=user_id,
+                opening_id=opening.id,
+                name="Applicant Preview",
+                email="applicant@example.com",
+                cv_text="Standard applicant profile for previewing recruiter scheduling availability.",
+                stage=CandidateStage.screening,
+            )
+            session.add(candidate)
+            session.commit()
+            session.refresh(candidate)
+
+        avail = self.get_or_create_availability(session, user_id)
+        slot_duration = avail.slot_duration_minutes or 30
+        token = secrets.token_urlsafe(24)
+        expires_at = now_utc + timedelta(days=30)
+
+        new_link = SchedulingLink(
+            token=token,
+            user_id=user_id,
+            candidate_id=candidate.id,
+            opening_id=candidate.opening_id,
+            slot_duration_minutes=slot_duration,
+            status=SchedulingLinkStatus.active,
+            expires_at=expires_at,
+        )
+        session.add(new_link)
+        session.commit()
+        session.refresh(new_link)
+
+        op = session.exec(select(JobOpening).where(JobOpening.id == new_link.opening_id)).first()
+
+        return SchedulingLinkRead(
+            id=new_link.id,
+            token=new_link.token,
+            user_id=new_link.user_id,
+            candidate_id=new_link.candidate_id,
+            candidate_name=candidate.name,
+            candidate_email=candidate.email,
+            opening_id=new_link.opening_id,
+            opening_title=op.title if op else "Interview",
+            slot_duration_minutes=new_link.slot_duration_minutes,
+            status=new_link.status.value if hasattr(new_link.status, "value") else str(new_link.status),
+            expires_at=ensure_utc(new_link.expires_at),
+            public_url=f"/schedule/{new_link.token}",
+            created_at=ensure_utc(new_link.created_at),
+        )
+
+    async def get_availability_week_preview(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        start_date_str: Optional[str] = None,
+    ) -> AvailabilityWeekPreviewResponse:
+        """
+        Fetches a comprehensive 7-day week schedule view for the recruiter:
+          1. Google Calendar busy events (purple)
+          2. Platform booked interviews (green)
+          3. Available free slots highlighted (blue)
+          4. Active recruiter booking link for copying & preview
+        """
+        avail = self.get_or_create_availability(session, user_id)
+        hr_tz_str = avail.timezone or "Asia/Karachi"
+        try:
+            hr_tz = ZoneInfo(hr_tz_str)
+        except Exception:
+            hr_tz = ZoneInfo("Asia/Karachi")
+
+        now_hr = datetime.now(hr_tz)
+        if start_date_str:
+            try:
+                parsed_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                parsed_date = now_hr.date()
+        else:
+            parsed_date = now_hr.date()
+
+        # Align to Monday of the week
+        monday = parsed_date - timedelta(days=parsed_date.weekday())
+        sunday = monday + timedelta(days=6)
+
+        week_start_str = monday.strftime("%Y-%m-%d")
+        week_end_str = sunday.strftime("%Y-%m-%d")
+
+        week_start_utc = datetime.combine(monday, datetime.min.time(), tzinfo=hr_tz).astimezone(timezone.utc)
+        week_end_utc = datetime.combine(sunday, datetime.max.time(), tzinfo=hr_tz).astimezone(timezone.utc)
+
+        # 1. Google Calendar busy ranges
+        google_busy_ranges = await self.get_google_calendar_busy_ranges(
+            session=session,
+            user_id=user_id,
+            time_min_utc=week_start_utc,
+            time_max_utc=week_end_utc,
+        )
+
+        google_events: List[CalendarBusyEvent] = []
+        for idx, (b_start, b_end) in enumerate(google_busy_ranges):
+            b_start_local = b_start.astimezone(hr_tz)
+            b_end_local = b_end.astimezone(hr_tz)
+            google_events.append(
+                CalendarBusyEvent(
+                    id=f"gcal_{idx}_{int(b_start.timestamp())}",
+                    title="Google Calendar Busy",
+                    start_time=ensure_utc(b_start),
+                    end_time=ensure_utc(b_end),
+                    start_local=b_start_local.strftime("%I:%M %p"),
+                    end_local=b_end_local.strftime("%I:%M %p"),
+                    date_str=b_start_local.strftime("%Y-%m-%d"),
+                )
+            )
+
+        # 2. DB booked interviews
+        db_interviews = session.exec(
+            select(Interview).where(
+                Interview.user_id == user_id,
+                Interview.status != InterviewStatus.cancelled,
+                Interview.start_time <= week_end_utc,
+                Interview.end_time >= week_start_utc,
+            ).order_by(Interview.start_time.asc())
+        ).all()
+
+        platform_events: List[CalendarBookedInterview] = []
+        db_busy_ranges: List[Tuple[datetime, datetime]] = []
+        for inv in db_interviews:
+            cand = session.exec(select(Candidate).where(Candidate.id == inv.candidate_id)).first()
+            op = session.exec(select(JobOpening).where(JobOpening.id == inv.opening_id)).first()
+            inv_start_utc = ensure_utc(inv.start_time)
+            inv_end_utc = ensure_utc(inv.end_time)
+            db_busy_ranges.append((inv_start_utc, inv_end_utc))
+            inv_start_local = inv_start_utc.astimezone(hr_tz)
+            inv_end_local = inv_end_utc.astimezone(hr_tz)
+
+            platform_events.append(
+                CalendarBookedInterview(
+                    id=inv.id,
+                    candidate_name=cand.name if cand else inv.title,
+                    candidate_email=cand.email if cand else "",
+                    opening_title=op.title if op else "Interview",
+                    start_time=inv_start_utc,
+                    end_time=inv_end_utc,
+                    start_local=inv_start_local.strftime("%I:%M %p"),
+                    end_local=inv_end_local.strftime("%I:%M %p"),
+                    date_str=inv_start_local.strftime("%Y-%m-%d"),
+                    meet_link=inv.meet_link,
+                    status=inv.status.value if hasattr(inv.status, "value") else str(inv.status),
+                )
+            )
+
+        # 3. Discretize free slots
+        all_busy = google_busy_ranges + db_busy_ranges
+        slot_duration = timedelta(minutes=avail.slot_duration_minutes)
+        buffer_duration = timedelta(minutes=avail.buffer_minutes)
+        step_duration = slot_duration + buffer_duration
+
+        weekday_keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        weekly_config = avail.weekly_hours or {}
+        blocked_dates_set = set(getattr(avail, "blocked_dates", []) or [])
+        now_utc = datetime.now(timezone.utc)
+
+        free_slots: List[CalendarFreeSlot] = []
+
+        curr_date = monday
+        while curr_date <= sunday:
+            date_key_str = curr_date.strftime("%Y-%m-%d")
+            if date_key_str in blocked_dates_set:
+                curr_date += timedelta(days=1)
+                continue
+
+            day_key = weekday_keys[curr_date.weekday()]
+            day_blocks = weekly_config.get(day_key, [])
+
+            for block in day_blocks:
+                start_str = block.get("start")
+                end_str = block.get("end")
+                if not start_str or not end_str:
+                    continue
+
+                try:
+                    s_h, s_m = map(int, start_str.split(":"))
+                    e_h, e_m = map(int, end_str.split(":"))
+                except ValueError:
+                    continue
+
+                block_start_dt = datetime.combine(curr_date, datetime.min.time(), tzinfo=hr_tz).replace(
+                    hour=s_h, minute=s_m
+                )
+                block_end_dt = datetime.combine(curr_date, datetime.min.time(), tzinfo=hr_tz).replace(
+                    hour=e_h, minute=e_m
+                )
+
+                curr_slot_start = block_start_dt
+                while curr_slot_start + slot_duration <= block_end_dt:
+                    curr_slot_end = curr_slot_start + slot_duration
+                    slot_start_utc = curr_slot_start.astimezone(timezone.utc)
+                    slot_end_utc = curr_slot_end.astimezone(timezone.utc)
+
+                    # Overlap check
+                    is_busy = False
+                    for b_start, b_end in all_busy:
+                        if b_start < slot_end_utc and b_end > slot_start_utc:
+                            is_busy = True
+                            break
+
+                    if not is_busy:
+                        slot_start_local = slot_start_utc.astimezone(hr_tz)
+                        slot_end_local = slot_end_utc.astimezone(hr_tz)
+                        free_slots.append(
+                            CalendarFreeSlot(
+                                start_time=slot_start_utc,
+                                end_time=slot_end_utc,
+                                start_local=slot_start_local.strftime("%I:%M %p"),
+                                end_local=slot_end_local.strftime("%I:%M %p"),
+                                date_str=slot_start_local.strftime("%Y-%m-%d"),
+                                is_past=(slot_start_utc < now_utc),
+                            )
+                        )
+
+                    curr_slot_start += step_duration
+
+            curr_date += timedelta(days=1)
+
+        booking_link = self.get_or_create_recruiter_booking_link(session, user_id)
+
+        return AvailabilityWeekPreviewResponse(
+            week_start=week_start_str,
+            week_end=week_end_str,
+            timezone=hr_tz_str,
+            slot_duration_minutes=avail.slot_duration_minutes,
+            buffer_minutes=avail.buffer_minutes,
+            google_busy_events=google_events,
+            platform_interviews=platform_events,
+            free_slots=free_slots,
+            booking_link_token=booking_link.token,
+            booking_link_url=booking_link.public_url,
+        )
+
     def _to_interview_read(
         self,
         interview: Interview,
@@ -1162,6 +1640,7 @@ class SchedulingService:
             opening_id=interview.opening_id,
             opening_title=opening_title,
             scheduling_link_id=interview.scheduling_link_id,
+            round_type=getattr(interview, "round_type", "initial") or "initial",
             title=interview.title,
             start_time=ensure_utc(interview.start_time),
             end_time=ensure_utc(interview.end_time),
@@ -1170,6 +1649,9 @@ class SchedulingService:
             meet_link=interview.meet_link,
             interviewer_email=interview.interviewer_email,
             status=interview.status.value if hasattr(interview.status, "value") else str(interview.status),
+            result_status=getattr(interview, "result_status", None),
+            feedback=getattr(interview, "feedback", None),
+            result_recorded_at=ensure_utc(getattr(interview, "result_recorded_at", None)),
             cancellation_reason=interview.cancellation_reason,
             cancelled_at=ensure_utc(interview.cancelled_at),
             cancelled_by=interview.cancelled_by,
@@ -1177,6 +1659,636 @@ class SchedulingService:
             reminder_1h_sent=interview.reminder_1h_sent,
             created_at=ensure_utc(interview.created_at),
             updated_at=ensure_utc(interview.updated_at),
+        )
+
+    # ── 10. Interview Lifecycle & Result Recording ───────────────────────────
+
+    def _try_send_gmail(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+        candidate_email: Optional[str],
+        subject: str,
+        body: str,
+        template_name: str,
+    ) -> None:
+        """Safely dispatches email via Google Workspace integration if account is connected."""
+        if not candidate_email or "@" not in candidate_email or candidate_email.endswith("@no-email.com"):
+            return
+        try:
+            g_acct = session.exec(select(GoogleAccount).where(GoogleAccount.user_id == user_id)).first()
+            if g_acct:
+                g_service = GoogleService(session)
+                g_service.send_email(
+                    user_id=user_id,
+                    request=GoogleSendEmailRequest(
+                        candidate_id=candidate_id,
+                        subject=subject,
+                        body=body,
+                        template_name=template_name,
+                    ),
+                )
+        except Exception as exc:
+            logger.info("Google Workspace email dispatch note for candidate %s (%s): %s", candidate_id, template_name, exc)
+
+    def record_interview_result(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        interview_id: uuid.UUID,
+        result_status: str,
+        feedback: Optional[str] = None,
+    ) -> InterviewResultResponse:
+        """
+        Records the outcome of an interview (passed, failed, or no-show):
+          - Passed (Initial)    -> Generates Behavioral scheduling link (45m) & dispatches Initial Passed email.
+          - Passed (Behavioral) -> Generates Final scheduling link (60m) & dispatches Behavioral Passed email.
+          - Passed (Final)      -> Generates Offer draft & moves stage to 'offer'. NEVER sends automatically!
+          - Failed              -> Dispatches Rejection email & marks candidate 'rejected'.
+          - No-show             -> Marks interview 'no_show'; stage preserved allowing rescheduling.
+        Every decision and transition is recorded in the audit trail.
+        """
+        result_clean = result_status.lower().strip()
+        if result_clean not in ("passed", "failed", "no_show"):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid result_status. Must be one of: 'passed', 'failed', 'no_show'.",
+            )
+
+        interview = session.exec(
+            select(Interview).where(
+                Interview.id == interview_id,
+                Interview.user_id == user_id,
+            )
+        ).first()
+        if not interview:
+            raise HTTPException(status_code=404, detail="Interview not found.")
+
+        candidate = session.exec(
+            select(Candidate).where(Candidate.id == interview.candidate_id)
+        ).first()
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found.")
+
+        opening = session.exec(
+            select(JobOpening).where(JobOpening.id == interview.opening_id)
+        ).first()
+        recruiter = session.exec(select(User).where(User.id == user_id)).first()
+
+        onboarding = session.exec(
+            select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)
+        ).first()
+        hr_name = onboarding.hr_name if (onboarding and onboarding.hr_name) else (getattr(recruiter, "name", None) or "Our Team")
+        company_name = onboarding.company_name if (onboarding and onboarding.company_name) else "Our Company"
+        email_tone = onboarding.email_tone if (onboarding and onboarding.email_tone) else "warm_professional"
+        user_templates = onboarding.templates if (onboarding and onboarding.templates) else {}
+        defaults = get_default_templates(hr_name=hr_name, company_name=company_name, email_tone=email_tone)
+
+        now_utc = datetime.now(timezone.utc)
+        current_round = (getattr(interview, "round_type", "initial") or "initial").lower().strip()
+        interview.result_status = result_clean
+        interview.feedback = feedback
+        interview.result_recorded_at = now_utc
+        interview.updated_at = now_utc
+
+        public_base = (getattr(settings, "FRONTEND_URL", None) or "http://localhost:3000").rstrip("/")
+        role_title = opening.title if opening else "Position"
+
+        # ── 1. Result: PASSED ──────────────────────────────────────────────────
+        if result_clean == "passed":
+            interview.status = InterviewStatus.passed
+
+            # Case 1A: Initial Passed -> Behavioral invite (45m default)
+            if current_round == "initial":
+                next_round = "behavioral"
+                dur = self.get_round_duration(session, user_id, "behavioral")
+                next_link = self.create_scheduling_link(
+                    session=session,
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    round_type="behavioral",
+                    slot_duration_minutes=dur,
+                    validity_days=7,
+                )
+                next_url = f"{public_base}/schedule/{next_link.token}"
+
+                tpl_cfg = user_templates.get("initial_passed") or defaults.get("initial_passed", {})
+                template_vars = {
+                    "candidate_name": candidate.name,
+                    "role": role_title,
+                    "company": company_name,
+                    "hr_name": hr_name,
+                    "schedule_link": next_url,
+                    "meet_link": next_url,
+                    "interview_date": "Flexible self-scheduling",
+                    "interview_time": f"{dur}-minute interview",
+                    "job_details": opening.description if opening and opening.description else "",
+                    "signature": f"Warm regards,\n{hr_name}\n{company_name}",
+                }
+                sub = fill_template_variables(
+                    tpl_cfg.get("subject", "Great speaking with you! Next steps for {role} at {company}"),
+                    template_vars,
+                )
+                body = fill_template_variables(
+                    tpl_cfg.get("body", "Hi {candidate_name},\n\nWe loved speaking with you! Please book your Behavioral round here: {schedule_link}"),
+                    template_vars,
+                )
+
+                # Record message
+                msg = Message(
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    direction=MessageDirection.outbound,
+                    message_type=MessageType.email,
+                    channel="email",
+                    body=body,
+                    status=MessageStatus.sent,
+                    hr_approved=True,
+                    template_name="initial_passed",
+                    template_variables={"subject": sub, "scheduling_url": next_url},
+                    sent_at=now_utc,
+                )
+                session.add(msg)
+                self._try_send_gmail(session, user_id, candidate.id, candidate.email, sub, body, "initial_passed")
+
+                candidate.stage = CandidateStage.interview
+                candidate.updated_at = now_utc
+                session.add(candidate)
+                session.add(interview)
+                session.commit()
+                session.refresh(interview)
+
+                audit_log_service.record(
+                    session=session,
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    opening_id=opening.id if opening else None,
+                    action="interview_passed",
+                    from_stage="scheduled",
+                    to_stage="interview",
+                    details=f"Initial Interview evaluated as Passed. Generated Behavioral scheduling link ({dur}m) and sent invitation.",
+                )
+
+                return InterviewResultResponse(
+                    interview=self._to_interview_read(interview, candidate, opening),
+                    interview_id=interview.id,
+                    result=result_clean,
+                    result_status="passed",
+                    round_type=current_round,
+                    candidate_id=candidate.id,
+                    candidate_name=candidate.name,
+                    next_action=f"Initial interview passed. Behavioral interview invitation ({dur}m) sent.",
+                    message=f"Initial interview passed. Behavioral interview invitation ({dur}m) sent.",
+                    next_round="behavioral",
+                    scheduling_link_token=next_link.token,
+                    scheduling_link_url=next_link.public_url,
+                    next_scheduling_link=next_url,
+                    email_dispatched="initial_passed",
+                    offer_draft_ready=False,
+                    offer_draft_created=False,
+                )
+
+            # Case 1B: Behavioral Passed -> Final invite (60m default)
+            elif current_round == "behavioral":
+                next_round = "final"
+                dur = self.get_round_duration(session, user_id, "final")
+                next_link = self.create_scheduling_link(
+                    session=session,
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    round_type="final",
+                    slot_duration_minutes=dur,
+                    validity_days=7,
+                )
+                next_url = f"{public_base}/schedule/{next_link.token}"
+
+                tpl_cfg = user_templates.get("behavioral_passed") or defaults.get("behavioral_passed", {})
+                template_vars = {
+                    "candidate_name": candidate.name,
+                    "role": role_title,
+                    "company": company_name,
+                    "hr_name": hr_name,
+                    "schedule_link": next_url,
+                    "meet_link": next_url,
+                    "interview_date": "Flexible self-scheduling",
+                    "interview_time": f"{dur}-minute interview",
+                    "job_details": opening.description if opening and opening.description else "",
+                    "signature": f"Warm regards,\n{hr_name}\n{company_name}",
+                }
+                sub = fill_template_variables(
+                    tpl_cfg.get("subject", "Wonderful feedback on your interview for {role} at {company}"),
+                    template_vars,
+                )
+                body = fill_template_variables(
+                    tpl_cfg.get("body", "Hi {candidate_name},\n\nThe team loved meeting with you! Book your Final round here: {schedule_link}"),
+                    template_vars,
+                )
+
+                # Record message
+                msg = Message(
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    direction=MessageDirection.outbound,
+                    message_type=MessageType.email,
+                    channel="email",
+                    body=body,
+                    status=MessageStatus.sent,
+                    hr_approved=True,
+                    template_name="behavioral_passed",
+                    template_variables={"subject": sub, "scheduling_url": next_url},
+                    sent_at=now_utc,
+                )
+                session.add(msg)
+                self._try_send_gmail(session, user_id, candidate.id, candidate.email, sub, body, "behavioral_passed")
+
+                candidate.stage = CandidateStage.interview
+                candidate.updated_at = now_utc
+                session.add(candidate)
+                session.add(interview)
+                session.commit()
+                session.refresh(interview)
+
+                audit_log_service.record(
+                    session=session,
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    opening_id=opening.id if opening else None,
+                    action="interview_passed",
+                    from_stage="scheduled",
+                    to_stage="interview",
+                    details=f"Behavioral Interview evaluated as Passed. Generated Final scheduling link ({dur}m) and sent invitation.",
+                )
+
+                return InterviewResultResponse(
+                    interview=self._to_interview_read(interview, candidate, opening),
+                    interview_id=interview.id,
+                    result=result_clean,
+                    result_status="passed",
+                    round_type=current_round,
+                    candidate_id=candidate.id,
+                    candidate_name=candidate.name,
+                    next_action=f"Behavioral interview passed. Final interview invitation ({dur}m) sent.",
+                    message=f"Behavioral interview passed. Final interview invitation ({dur}m) sent.",
+                    next_round="final",
+                    scheduling_link_token=next_link.token,
+                    scheduling_link_url=next_link.public_url,
+                    next_scheduling_link=next_url,
+                    email_dispatched="behavioral_passed",
+                    offer_draft_ready=False,
+                    offer_draft_created=False,
+                )
+
+            # Case 1C: Final Passed -> Creates Offer draft. NEVER SENDS AUTOMATICALLY!
+            else:
+                tpl_cfg = user_templates.get("offer_letter") or defaults.get("offer_letter", {})
+                template_vars = {
+                    "candidate_name": candidate.name,
+                    "role": role_title,
+                    "company": company_name,
+                    "hr_name": hr_name,
+                    "job_details": opening.description if opening and opening.description else "",
+                    "signature": f"Warm regards,\n{hr_name}\n{company_name}",
+                }
+                offer_sub = fill_template_variables(
+                    tpl_cfg.get("subject", "Offer of Employment: Welcome to {company}!"),
+                    template_vars,
+                )
+                offer_body = fill_template_variables(
+                    tpl_cfg.get("body", "Hi {candidate_name},\n\nOn behalf of everyone at {company}, I am thrilled to extend an offer for the {role} position!"),
+                    template_vars,
+                )
+
+                candidate.stage = CandidateStage.offer
+                candidate.offer_letter_status = "draft"
+                candidate.offer_letter_draft = {
+                    "subject": offer_sub,
+                    "body": offer_body,
+                    "candidate_name": candidate.name,
+                    "candidate_email": candidate.email,
+                    "role": role_title,
+                    "company": company_name,
+                    "created_at": now_utc.isoformat(),
+                }
+                candidate.updated_at = now_utc
+
+                session.add(candidate)
+                session.add(interview)
+                session.commit()
+                session.refresh(interview)
+
+                audit_log_service.record(
+                    session=session,
+                    user_id=user_id,
+                    candidate_id=candidate.id,
+                    opening_id=opening.id if opening else None,
+                    action="interview_passed",
+                    from_stage="scheduled",
+                    to_stage="offer",
+                    details="Final Interview evaluated as Passed. Offer letter draft created. Awaiting HR approval before sending.",
+                )
+
+                return InterviewResultResponse(
+                    interview=self._to_interview_read(interview, candidate, opening),
+                    interview_id=interview.id,
+                    result=result_clean,
+                    result_status="passed",
+                    round_type=current_round,
+                    candidate_id=candidate.id,
+                    candidate_name=candidate.name,
+                    next_action="Final interview passed. Offer letter draft generated and pending HR approval before sending.",
+                    message="Final interview passed. Offer letter draft generated and pending HR approval before sending.",
+                    next_round="offer",
+                    scheduling_link_token=None,
+                    scheduling_link_url=None,
+                    next_scheduling_link=None,
+                    email_dispatched=None,
+                    offer_draft_ready=True,
+                    offer_draft_created=True,
+                )
+
+        # ── 2. Result: FAILED ──────────────────────────────────────────────────
+        elif result_clean == "failed":
+            interview.status = InterviewStatus.failed
+            candidate.stage = CandidateStage.rejected
+            candidate.review_status = "rejected"
+            candidate.updated_at = now_utc
+
+            tpl_cfg = user_templates.get("rejection") or defaults.get("rejection", {})
+            template_vars = {
+                "candidate_name": candidate.name,
+                "role": role_title,
+                "company": company_name,
+                "hr_name": hr_name,
+                "signature": f"Warm regards,\n{hr_name}\n{company_name}",
+            }
+            sub = fill_template_variables(
+                tpl_cfg.get("subject", "Update on your application for {role} at {company}"),
+                template_vars,
+            )
+            body = fill_template_variables(
+                tpl_cfg.get("body", "Hi {candidate_name},\n\nThank you for taking the time to interview with us. At this time, we have decided to move forward with other candidates.\n\nWe wish you all the best in your search."),
+                template_vars,
+            )
+
+            msg = Message(
+                user_id=user_id,
+                candidate_id=candidate.id,
+                direction=MessageDirection.outbound,
+                message_type=MessageType.email,
+                channel="email",
+                body=body,
+                status=MessageStatus.sent,
+                hr_approved=True,
+                template_name="rejection",
+                template_variables={"subject": sub},
+                sent_at=now_utc,
+            )
+            session.add(msg)
+            self._try_send_gmail(session, user_id, candidate.id, candidate.email, sub, body, "rejection")
+
+            session.add(candidate)
+            session.add(interview)
+            session.commit()
+            session.refresh(interview)
+
+            audit_log_service.record(
+                session=session,
+                user_id=user_id,
+                candidate_id=candidate.id,
+                opening_id=opening.id if opening else None,
+                action="interview_failed",
+                from_stage="scheduled",
+                to_stage="rejected",
+                details=f"Interview ({current_round}) evaluated as Failed. Rejection email dispatched to {candidate.email}.",
+            )
+
+            return InterviewResultResponse(
+                interview=self._to_interview_read(interview, candidate, opening),
+                interview_id=interview.id,
+                result=result_clean,
+                result_status="failed",
+                round_type=current_round,
+                candidate_id=candidate.id,
+                candidate_name=candidate.name,
+                next_action="Interview evaluated as Failed. Rejection email sent to candidate.",
+                message="Interview evaluated as Failed. Rejection email sent to candidate.",
+                next_round=None,
+                scheduling_link_token=None,
+                scheduling_link_url=None,
+                next_scheduling_link=None,
+                email_dispatched="rejection",
+                offer_draft_ready=False,
+                offer_draft_created=False,
+            )
+
+        # ── 3. Result: NO-SHOW ─────────────────────────────────────────────────
+        else:
+            interview.status = InterviewStatus.no_show
+            interview.updated_at = now_utc
+            session.add(interview)
+            session.commit()
+            session.refresh(interview)
+
+            audit_log_service.record(
+                session=session,
+                user_id=user_id,
+                candidate_id=candidate.id,
+                opening_id=opening.id if opening else None,
+                action="interview_no_show",
+                from_stage="scheduled",
+                to_stage=candidate.stage.value if hasattr(candidate.stage, "value") else str(candidate.stage),
+                details=f"Interview ({current_round}) marked as No-show. Candidate remains eligible for rescheduling.",
+            )
+
+            return InterviewResultResponse(
+                interview=self._to_interview_read(interview, candidate, opening),
+                interview_id=interview.id,
+                result=result_clean,
+                result_status="no_show",
+                round_type=current_round,
+                candidate_id=candidate.id,
+                candidate_name=candidate.name,
+                next_action="Interview marked as No-show. Candidate can reschedule if appropriate.",
+                message="Interview marked as No-show. Candidate can reschedule if appropriate.",
+                next_round=None,
+                scheduling_link_token=None,
+                scheduling_link_url=None,
+                next_scheduling_link=None,
+                email_dispatched=None,
+                offer_draft_ready=False,
+                offer_draft_created=False,
+            )
+
+    def get_offer_draft(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+    ) -> OfferDraftResponse:
+        """
+        Retrieves the Offer Letter draft for HR review.
+        If no draft exists yet, populates default from the recruiter's offer_letter template.
+        """
+        candidate = session.exec(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                Candidate.user_id == user_id,
+            )
+        ).first()
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found.")
+
+        opening = session.exec(
+            select(JobOpening).where(JobOpening.id == candidate.opening_id)
+        ).first()
+        recruiter = session.exec(select(User).where(User.id == user_id)).first()
+
+        onboarding = session.exec(
+            select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)
+        ).first()
+        hr_name = onboarding.hr_name if (onboarding and onboarding.hr_name) else (getattr(recruiter, "name", None) or "Our Team")
+        company_name = onboarding.company_name if (onboarding and onboarding.company_name) else "Our Company"
+        email_tone = onboarding.email_tone if (onboarding and onboarding.email_tone) else "warm_professional"
+        user_templates = onboarding.templates if (onboarding and onboarding.templates) else {}
+        defaults = get_default_templates(hr_name=hr_name, company_name=company_name, email_tone=email_tone)
+
+        role_title = opening.title if opening else "Position"
+
+        draft_dict = candidate.offer_letter_draft or {}
+        subject = draft_dict.get("subject")
+        body = draft_dict.get("body")
+
+        if not subject or not body:
+            tpl_cfg = user_templates.get("offer_letter") or defaults.get("offer_letter", {})
+            template_vars = {
+                "candidate_name": candidate.name,
+                "role": role_title,
+                "company": company_name,
+                "hr_name": hr_name,
+                "job_details": opening.description if opening and opening.description else "",
+                "signature": f"Warm regards,\n{hr_name}\n{company_name}",
+            }
+            subject = fill_template_variables(
+                tpl_cfg.get("subject", "Offer of Employment: Welcome to {company}!"),
+                template_vars,
+            )
+            body = fill_template_variables(
+                tpl_cfg.get("body", "Hi {candidate_name},\n\nOn behalf of everyone at {company}, I am thrilled to extend an offer for the {role} position!"),
+                template_vars,
+            )
+            candidate.offer_letter_draft = {
+                "subject": subject,
+                "body": body,
+                "candidate_name": candidate.name,
+                "candidate_email": candidate.email,
+                "role": role_title,
+                "company": company_name,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if not candidate.offer_letter_status:
+                candidate.offer_letter_status = "draft"
+            session.add(candidate)
+            session.commit()
+            session.refresh(candidate)
+
+        return OfferDraftResponse(
+            candidate_id=candidate.id,
+            candidate_name=candidate.name,
+            candidate_email=candidate.email,
+            opening_id=candidate.opening_id,
+            opening_title=role_title,
+            status=candidate.offer_letter_status or "draft",
+            subject=subject,
+            body=body,
+            sent_at=ensure_utc(candidate.offer_letter_sent_at),
+        )
+
+    def approve_and_send_offer(
+        self,
+        session: Session,
+        user_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+        payload: OfferSendRequest,
+    ) -> OfferDraftResponse:
+        """
+        HR approves and sends the Offer Letter email.
+        STRICT SECURITY GATE: Offer letters are NEVER sent automatically without this explicit call.
+        """
+        candidate = session.exec(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                Candidate.user_id == user_id,
+            )
+        ).first()
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found.")
+
+        opening = session.exec(
+            select(JobOpening).where(JobOpening.id == candidate.opening_id)
+        ).first()
+
+        subject = payload.subject.strip()
+        body = payload.body.strip()
+        if not subject or not body:
+            raise HTTPException(status_code=400, detail="Offer letter subject and body cannot be empty.")
+
+        now_utc = datetime.now(timezone.utc)
+        candidate.stage = CandidateStage.offer
+        candidate.offer_letter_status = "sent"
+        candidate.offer_letter_sent_at = now_utc
+        candidate.offer_letter_draft = {
+            "subject": subject,
+            "body": body,
+            "candidate_name": candidate.name,
+            "candidate_email": candidate.email,
+            "role": opening.title if opening else "Position",
+            "sent_at": now_utc.isoformat(),
+        }
+        candidate.updated_at = now_utc
+        session.add(candidate)
+
+        # Dispatch Message
+        msg = Message(
+            user_id=user_id,
+            candidate_id=candidate.id,
+            direction=MessageDirection.outbound,
+            message_type=MessageType.email,
+            channel="email",
+            body=body,
+            status=MessageStatus.sent,
+            hr_approved=True,
+            template_name="offer_letter",
+            template_variables={"subject": subject},
+            sent_at=now_utc,
+        )
+        session.add(msg)
+        self._try_send_gmail(session, user_id, candidate.id, candidate.email, subject, body, "offer_letter")
+
+        session.commit()
+        session.refresh(candidate)
+
+        audit_log_service.record(
+            session=session,
+            user_id=user_id,
+            candidate_id=candidate.id,
+            opening_id=candidate.opening_id,
+            action="offer_letter_approved_and_sent",
+            from_stage="offer",
+            to_stage="offer",
+            details=f"Offer letter approved and dispatched by HR to {candidate.email}. Subject: '{subject}'",
+        )
+
+        return OfferDraftResponse(
+            candidate_id=candidate.id,
+            candidate_name=candidate.name,
+            candidate_email=candidate.email,
+            opening_id=candidate.opening_id,
+            opening_title=opening.title if opening else "Position",
+            status="sent",
+            subject=subject,
+            body=body,
+            sent_at=ensure_utc(candidate.offer_letter_sent_at),
         )
 
 

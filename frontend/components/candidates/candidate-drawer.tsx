@@ -60,7 +60,11 @@ interface CandidateDrawerProps {
 const STAGE_CONFIG: Record<CandidateStage, { label: string; color: string }> = {
   applied: { label: "Applied", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20" },
   screening: { label: "Screening", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20" },
+  shortlisted: { label: "Shortlisted", color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
+  contacted: { label: "Contacted", color: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20" },
+  scheduled: { label: "Scheduled", color: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20" },
   interview: { label: "Interview", color: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" },
+  interviewed: { label: "Interviewed", color: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20" },
   offer: { label: "Offer", color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
   rejected: { label: "Rejected", color: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20" },
 };

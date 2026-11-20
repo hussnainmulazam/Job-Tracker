@@ -64,6 +64,11 @@ class JobOpening(SQLModel, table=True):
         default=JobOpeningStatus.active,
         index=True,
     )
+    pass_mark: int = Field(
+        default=80,
+        sa_column=Column(sa.Integer, server_default="80", nullable=False),
+        description="Minimum passing score required for recommendation (default 80, editable per opening)",
+    )
     google_sheet_id: Optional[str] = Field(default=None, max_length=255, nullable=True)
     google_sheet_url: Optional[str] = Field(default=None, max_length=500, nullable=True)
 

@@ -1,4 +1,5 @@
 from app.models.application import Application, ApplicationStatus
+from app.models.agent_settings import AgentSettings
 from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate, CandidateStage
 from app.models.candidate_link import CandidateLink
@@ -16,6 +17,7 @@ from app.models.job import Job
 from app.models.job_opening import JobOpening, JobOpeningStatus
 from app.models.message import Message, MessageDirection, MessageStatus, MessageType
 from app.models.notification import Notification
+from app.models.onboarding import OnboardingSetup
 from app.models.scorecard import Scorecard
 from app.models.user import User
 
@@ -44,4 +46,6 @@ __all__ = [
     "Interview",
     "InterviewStatus",
     "Notification",
+    "OnboardingSetup",
+    "AgentSettings",
 ]

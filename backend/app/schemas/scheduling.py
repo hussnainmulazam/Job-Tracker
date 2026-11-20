@@ -51,7 +51,8 @@ class AvailabilityScheduleRead(BaseModel):
 
 class SchedulingLinkCreate(BaseModel):
     candidate_id: uuid.UUID
-    slot_duration_minutes: Optional[int] = 30
+    round_type: Optional[str] = "initial"
+    slot_duration_minutes: Optional[int] = None
     validity_days: Optional[int] = 7
 
 
@@ -64,6 +65,7 @@ class SchedulingLinkRead(BaseModel):
     candidate_email: str
     opening_id: uuid.UUID
     opening_title: str
+    round_type: str = "initial"
     slot_duration_minutes: int
     status: str
     expires_at: datetime
@@ -101,6 +103,7 @@ class InterviewRead(BaseModel):
     opening_title: str
     scheduling_link_id: Optional[uuid.UUID] = None
     title: str
+    round_type: str = "initial"
     start_time: datetime
     end_time: datetime
     timezone: str
@@ -108,6 +111,9 @@ class InterviewRead(BaseModel):
     meet_link: Optional[str] = None
     interviewer_email: str
     status: str
+    result_status: Optional[str] = None
+    feedback: Optional[str] = None
+    result_recorded_at: Optional[datetime] = None
     cancellation_reason: Optional[str] = None
     cancelled_at: Optional[datetime] = None
     cancelled_by: Optional[str] = None
@@ -127,6 +133,7 @@ class PublicSchedulePageInfo(BaseModel):
     candidate_email: str
     candidate_phone: Optional[str] = None
     opening_title: str
+    round_type: str = "initial"
     slot_duration_minutes: int
     default_timezone: str
     interviewer_email: str
@@ -154,3 +161,102 @@ class ReminderProcessResult(BaseModel):
     reminders_24h_sent: int
     reminders_1h_sent: int
     interviews_processed: int
+
+
+class CalendarSyncResponse(BaseModel):
+    synced_count: int
+    updated_count: int
+    cancelled_count: int
+    detail: str
+
+
+class CalendarBusyEvent(BaseModel):
+    id: str
+    title: str = "Google Calendar Busy"
+    start_time: datetime
+    end_time: datetime
+    start_local: str
+    end_local: str
+    date_str: str
+
+
+class CalendarBookedInterview(BaseModel):
+    id: uuid.UUID
+    candidate_name: str
+    candidate_email: str
+    opening_title: str
+    start_time: datetime
+    end_time: datetime
+    start_local: str
+    end_local: str
+    date_str: str
+    meet_link: Optional[str] = None
+    status: str
+
+
+class CalendarFreeSlot(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    start_local: str
+    end_local: str
+    date_str: str
+    is_past: bool = False
+
+
+class AvailabilityWeekPreviewResponse(BaseModel):
+    week_start: str
+    week_end: str
+    timezone: str
+    slot_duration_minutes: int
+    buffer_minutes: int
+    google_busy_events: List[CalendarBusyEvent]
+    platform_interviews: List[CalendarBookedInterview]
+    free_slots: List[CalendarFreeSlot]
+    booking_link_token: str
+    booking_link_url: str
+
+
+# ── Interview Lifecycle & Results Schemas ─────────────────────────────────────
+
+class InterviewResultRequest(BaseModel):
+    result: str = Field(..., pattern="^(passed|failed|no_show)$", description="'passed', 'failed', or 'no_show'")
+    feedback: Optional[str] = Field(default=None, description="Optional notes or scorecard feedback")
+
+
+class InterviewResultResponse(BaseModel):
+    interview: Optional[InterviewRead] = None
+    interview_id: Optional[uuid.UUID] = None
+    candidate_id: Optional[uuid.UUID] = None
+    candidate_name: Optional[str] = None
+    result: str = "passed"
+    result_status: str = "passed"
+    round_type: str = "initial"
+    next_round: Optional[str] = None
+    next_action: Optional[str] = None
+    next_scheduling_link: Optional[str] = None
+    scheduling_link_token: Optional[str] = None
+    scheduling_link_url: Optional[str] = None
+    email_dispatched: Optional[str] = None
+    offer_draft_created: bool = False
+    offer_draft_ready: bool = False
+    message: Optional[str] = None
+
+
+class OfferDraftResponse(BaseModel):
+    candidate_id: uuid.UUID
+    candidate_name: str
+    candidate_email: str
+    opening_id: uuid.UUID
+    opening_title: str
+    status: str  # "draft" | "sent" | "not_drafted"
+    subject: str
+    body: str
+    created_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
+
+
+class OfferSendRequest(BaseModel):
+    subject: str = Field(..., min_length=2, description="Offer email subject line")
+    body: str = Field(..., min_length=5, description="Full offer letter body")
+
+

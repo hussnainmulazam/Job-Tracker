@@ -529,6 +529,8 @@ class CandidateService:
         for c in items:
             r = CandidateRead.model_validate(c)
             r.opening_title = openings_map.get(c.opening_id)
+            if not r.recommendation:
+                r.recommendation = (c.extracted_data or {}).get("recommendation")
             read_items.append(r)
 
         return PaginatedCandidates(
@@ -1235,9 +1237,12 @@ class CandidateService:
         candidate.updated_at = datetime.now(timezone.utc)
 
         # Store hash and metadata in extracted_data
+        from app.services.cv_review_service import compute_recommendation
+        pass_mark = getattr(opening, "pass_mark", 80) or 80
+
         ext_data = dict(candidate.extracted_data or {})
         ext_data["cv_hash"] = cv_hash
-        ext_data["recommendation"] = result.get("recommendation")
+        ext_data["recommendation"] = compute_recommendation(result["score"], pass_mark)
         ext_data["interview_focus_areas"] = result.get("interview_focus_areas", [])
         ext_data["model_used"] = result.get("model_used")
         ext_data["latency_seconds"] = result.get("latency_seconds")

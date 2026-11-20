@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useState, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Settings,
@@ -29,9 +29,18 @@ import {
   AlertTriangle,
   Clock,
   MessageSquare,
-  Phone,
   UserCheck,
   FileText,
+  Activity,
+  Layers,
+  Copy,
+  Search,
+  ArrowRight,
+  ShieldCheck,
+  Zap,
+  Sparkles,
+  Eye,
+  Edit3,
 } from "lucide-react";
 
 import {
@@ -40,11 +49,20 @@ import {
   googleApi,
   jobOpeningsApi,
   healthApi,
+  auditLogsApi,
+  onboardingApi,
   DbHealthResponse,
+  PineconeHealthResponse,
   GoogleAccountStatus,
   GmailSyncResponse,
+  AuditLog,
   removeAuthToken,
 } from "@/lib/api";
+import {
+  LIFECYCLE_TEMPLATES,
+  DEFAULT_LIFECYCLE_TEMPLATES,
+  VARIABLE_CHIPS,
+} from "@/components/setup/setup-wizard-dialog";
 import { useTheme } from "@/components/theme-provider";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/ui/page-header";
@@ -58,9 +76,11 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { AgentControlHub } from "@/components/agent/agent-control-hub";
 
 interface UserProfile {
   id: string;
@@ -79,12 +99,19 @@ interface ModelHealthItem {
 }
 
 interface AIModelsHealthResponse {
-  status: "healthy" | "degraded" | "failing";
-  models: ModelHealthItem[];
+  status: "healthy" | "degraded" | "failing" | "unconfigured";
+  models?: Record<string, ModelHealthItem> | ModelHealthItem[];
+  openrouter_base_url?: string;
+  grok_base_url?: string;
+  active_provider?: string;
 }
 
-export default function SettingsPage() {
+function SettingsPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") || "general";
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -97,6 +124,18 @@ export default function SettingsPage() {
   const [filterInitialized, setFilterInitialized] = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState<GmailSyncResponse | null>(null);
 
+  // Audit trail search & filter
+  const [auditActionFilter, setAuditActionFilter] = useState<string>("all");
+  const [auditSearchQuery, setAuditSearchQuery] = useState<string>("");
+
+  // Sync tab with URL
+  const handleTabChange = (val: string) => {
+    setActiveTab(val);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", val);
+    window.history.replaceState({}, "", url.toString());
+  };
+
   // Fetch active job openings for Gmail resume assignment
   const { data: openingsData } = useQuery({
     queryKey: ["settings-job-openings"],
@@ -108,9 +147,7 @@ export default function SettingsPage() {
   // 1. Fetch User Profile
   const { data: user, isLoading: isUserLoading } = useQuery<UserProfile>({
     queryKey: ["current-user"],
-    queryFn: async () => {
-      return apiFetch<UserProfile>("/api/v1/auth/me");
-    },
+    queryFn: async () => apiFetch<UserProfile>("/api/v1/auth/me"),
     retry: false,
   });
 
@@ -144,6 +181,18 @@ export default function SettingsPage() {
     retry: false,
   });
 
+  // 2c. Fetch Live Pinecone Vector Database Latency & Health
+  const {
+    data: pineconeHealth,
+    isLoading: isPineconeLoading,
+    isFetching: isPineconeFetching,
+    refetch: refetchPineconeHealth,
+  } = useQuery<PineconeHealthResponse>({
+    queryKey: ["pinecone-health"],
+    queryFn: () => healthApi.checkPinecone(),
+    retry: false,
+  });
+
   // 3. Fetch Live AI Model Health
   const {
     data: aiHealth,
@@ -152,10 +201,14 @@ export default function SettingsPage() {
     refetch: refetchAIHealth,
   } = useQuery<AIModelsHealthResponse>({
     queryKey: ["ai-models-health"],
-    queryFn: async () => {
-      return api.get<AIModelsHealthResponse>("/api/v1/ai/models/health");
-    },
+    queryFn: async () => api.get<AIModelsHealthResponse>("/api/v1/ai/models/health"),
   });
+
+  const modelList: ModelHealthItem[] = useMemo(() => {
+    if (!aiHealth?.models) return [];
+    if (Array.isArray(aiHealth.models)) return aiHealth.models;
+    return Object.values(aiHealth.models);
+  }, [aiHealth]);
 
   // 4. Fetch Google Account Status
   const {
@@ -164,16 +217,157 @@ export default function SettingsPage() {
     refetch: refetchGoogleStatus,
   } = useQuery<GoogleAccountStatus>({
     queryKey: ["google-status"],
-    queryFn: async () => {
-      return googleApi.getStatus();
-    },
+    queryFn: () => googleApi.getStatus(),
     retry: false,
   });
+
+  // 5. Fetch Audit Trail Log
+  const {
+    data: auditData,
+    isLoading: isAuditLoading,
+    isFetching: isAuditFetching,
+    refetch: refetchAudit,
+  } = useQuery({
+    queryKey: ["recentAuditLogs", auditActionFilter],
+    queryFn: () => auditLogsApi.listRecent({ limit: 100 }),
+  });
+  const auditLogs = auditData?.items || [];
+
+  // 6. Fetch Onboarding & Lifecycle Recruiting Templates
+  const { data: onboardingData } = useQuery({
+    queryKey: ["onboarding-status"],
+    queryFn: () => onboardingApi.getStatus(),
+    retry: false,
+  });
+
+  const [activeSettingsTemplate, setActiveSettingsTemplate] = useState("cv_received");
+  const [settingsTemplates, setSettingsTemplates] = useState<Record<string, { subject: string; body: string; name?: string }>>(
+    DEFAULT_LIFECYCLE_TEMPLATES
+  );
+  const [settingsPreviewMode, setSettingsPreviewMode] = useState(false);
+  const [isGeneratingAllSettingsAI, setIsGeneratingAllSettingsAI] = useState(false);
+  const [regeneratingSettingsKey, setRegeneratingSettingsKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (onboardingData?.step_4?.templates && Object.keys(onboardingData.step_4.templates).length > 0) {
+      setSettingsTemplates({
+        ...DEFAULT_LIFECYCLE_TEMPLATES,
+        ...onboardingData.step_4.templates,
+      });
+    }
+  }, [onboardingData]);
+
+  const saveSettingsTemplatesMutation = useMutation({
+    mutationFn: () => {
+      const sanitized: Record<string, { subject: string; body: string; name?: string }> = {};
+      Object.entries(settingsTemplates).forEach(([k, v]) => {
+        sanitized[k] = {
+          name: v.name || k,
+          subject: (v.subject || "").trim() || "Application Status Update",
+          body: (v.body || "").trim() || "Thank you for connecting with our recruiting team.",
+        };
+      });
+      return onboardingApi.saveStep4({ templates: sanitized });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+      toast({
+        title: "Templates Saved",
+        description: "Candidate lifecycle email templates updated and saved to PostgreSQL.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to save templates",
+        description: err.message || "Could not save templates.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSettingsGenerateAllAI = async () => {
+    setIsGeneratingAllSettingsAI(true);
+    try {
+      const hr = onboardingData?.step_1;
+      const res = await onboardingApi.generateTemplates({
+        hr_name: hr?.hr_name || "Talent Lead",
+        company_name: hr?.company_name || "Our Company",
+        hr_role: hr?.hr_role || "Recruiter",
+        email_tone: hr?.email_tone || "warm_professional",
+      });
+      if (res?.templates) {
+        setSettingsTemplates((prev) => ({
+          ...prev,
+          ...res.templates,
+        }));
+        queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+        toast({
+          title: "✨ All 11 Templates Generated with AI",
+          description: `Generated in ${res.latency_seconds || 3.5}s using ${res.model_used || "AI"}. Short, warm, and human.`,
+        });
+      }
+    } catch (err: any) {
+      toast({
+        title: "Generation error",
+        description: err.message || "Failed to generate templates.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingAllSettingsAI(false);
+    }
+  };
+
+  const handleSettingsRegenerateSingleAI = async (key: string) => {
+    setRegeneratingSettingsKey(key);
+    try {
+      const hr = onboardingData?.step_1;
+      const res = await onboardingApi.generateTemplates({
+        hr_name: hr?.hr_name || "Talent Lead",
+        company_name: hr?.company_name || "Our Company",
+        hr_role: hr?.hr_role || "Recruiter",
+        email_tone: hr?.email_tone || "warm_professional",
+        single_template_key: key,
+      });
+      if (res?.templates && res.templates[key]) {
+        setSettingsTemplates((prev) => ({
+          ...prev,
+          [key]: res.templates[key],
+        }));
+        queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+        const name = LIFECYCLE_TEMPLATES.find((t) => t.key === key)?.name || key;
+        toast({
+          title: `✨ ${name} Regenerated with AI`,
+          description: `Fresh human draft generated in ${res.latency_seconds || 1.2}s.`,
+        });
+      }
+    } catch (err: any) {
+      toast({
+        title: "Regeneration failed",
+        description: err.message || "Failed to regenerate template.",
+        variant: "destructive",
+      });
+    } finally {
+      setRegeneratingSettingsKey(null);
+    }
+  };
+
+  const handleInsertVariableSettings = (token: string) => {
+    const cur = settingsTemplates[activeSettingsTemplate] || { subject: "", body: "" };
+    setSettingsTemplates({
+      ...settingsTemplates,
+      [activeSettingsTemplate]: {
+        ...cur,
+        body: cur.body ? `${cur.body} ${token}` : token,
+      },
+    });
+  };
 
   // Synchronize filter input defaults with backend status
   useEffect(() => {
     if (googleStatus && !filterInitialized) {
-      setFilterQuery(googleStatus.sync_query || "has:attachment (filename:pdf OR filename:docx) newer_than:30d");
+      setFilterQuery(
+        googleStatus.sync_query || "has:attachment (filename:pdf OR filename:docx) newer_than:30d"
+      );
       setFilterLabel(googleStatus.sync_label || "INBOX");
       setDefaultOpeningId(googleStatus.default_opening_id || "");
       setAutoReplyEnabled(googleStatus.auto_reply_enabled ?? true);
@@ -181,7 +375,7 @@ export default function SettingsPage() {
     }
   }, [googleStatus, filterInitialized]);
 
-  // Handle OAuth callback search parameters (success or error notifications)
+  // Handle OAuth callback parameters
   useEffect(() => {
     if (typeof window === "undefined") return;
     const urlParams = new URLSearchParams(window.location.search);
@@ -209,14 +403,9 @@ export default function SettingsPage() {
 
   // Mutations for Google actions
   const connectMutation = useMutation({
-    mutationFn: async () => {
-      const res = await googleApi.getLoginUrl();
-      return res;
-    },
+    mutationFn: () => googleApi.getLoginUrl(),
     onSuccess: (data) => {
-      if (data?.auth_url) {
-        window.location.href = data.auth_url;
-      }
+      if (data?.auth_url) window.location.href = data.auth_url;
     },
     onError: (err: any) => {
       toast({
@@ -228,9 +417,7 @@ export default function SettingsPage() {
   });
 
   const disconnectMutation = useMutation({
-    mutationFn: async () => {
-      return googleApi.disconnect();
-    },
+    mutationFn: () => googleApi.disconnect(),
     onSuccess: () => {
       toast({
         title: "Google Account Disconnected",
@@ -249,12 +436,11 @@ export default function SettingsPage() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: async () => {
-      return googleApi.syncGmail({
+    mutationFn: () =>
+      googleApi.syncGmail({
         query: filterQuery || undefined,
         label: filterLabel || undefined,
-      });
-    },
+      }),
     onSuccess: (data) => {
       setLastSyncResult(data);
       queryClient.invalidateQueries({ queryKey: ["google-status"] });
@@ -275,14 +461,13 @@ export default function SettingsPage() {
   });
 
   const saveSettingsMutation = useMutation({
-    mutationFn: async () => {
-      return googleApi.updateSettings({
+    mutationFn: () =>
+      googleApi.updateSettings({
         sync_query: filterQuery,
         sync_label: filterLabel,
         default_opening_id: defaultOpeningId || null,
         auto_reply_enabled: autoReplyEnabled,
-      });
-    },
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["google-status"] });
       toast({
@@ -308,716 +493,1048 @@ export default function SettingsPage() {
     }
   };
 
+  const filteredAuditLogs = useMemo(() => {
+    let list = auditLogs;
+    if (auditActionFilter !== "all") {
+      list = list.filter((item) => item.action === auditActionFilter);
+    }
+    if (auditSearchQuery.trim()) {
+      const q = auditSearchQuery.toLowerCase();
+      list = list.filter(
+        (item) =>
+          (item.candidate_name && item.candidate_name.toLowerCase().includes(q)) ||
+          (item.opening_title && item.opening_title.toLowerCase().includes(q)) ||
+          (item.details && item.details.toLowerCase().includes(q)) ||
+          item.action.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [auditLogs, auditActionFilter, auditSearchQuery]);
+
   return (
     <AppShell title="Settings & Infrastructure">
-      <div className="space-y-6 max-w-4xl pb-16">
+      <div className="space-y-6 max-w-5xl pb-20">
+        {/* Page Header */}
         <PageHeader
-          title="Settings & System Infrastructure"
-          description="Manage Google Workspace integrations, resume ingestion filters, AI inference chains, and database connection latency."
+          title="Settings & Workspace Hub"
+          description="Manage recruiter preferences, Google Workspace integrations, system health latency, message templates, and audit logs."
           badge={
-            <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+            <Badge variant="outline" className="gap-1.5 font-mono text-[11px] px-2.5 py-1">
               <Shield className="h-3 w-3 text-primary" />
-              <span>System Health</span>
+              <span>System Hub</span>
             </Badge>
           }
         />
 
-        {/* 1. User Profile Card */}
-        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-              <UserIcon className="h-4 w-4 text-primary" />
-              <span>User Profile</span>
-            </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground">
-              Your authenticated identity and Supabase session credentials
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {isUserLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-4 w-72" />
-              </div>
-            ) : user ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-lg border border-border/70 bg-muted/30 space-y-1">
-                  <span className="text-[11px] text-muted-foreground font-medium">Email Address</span>
-                  <p className="font-semibold text-foreground truncate">{user.email}</p>
-                </div>
-                <div className="p-3 rounded-lg border border-border/70 bg-muted/30 space-y-1">
-                  <span className="text-[11px] text-muted-foreground font-medium">User Identifier (UUID)</span>
-                  <p className="font-mono text-[11px] text-foreground truncate">{user.id}</p>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">No active session.</p>
-            )}
-          </CardContent>
-        </Card>
+        {/* Unified Tabs Navigation */}
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
+          <TabsList className="bg-muted/40 p-1 border border-border/70 rounded-xl flex flex-wrap gap-1 w-full justify-start overflow-x-auto">
+            <TabsTrigger value="general" className="gap-1.5 text-xs font-semibold px-3 py-1.5">
+              <UserIcon className="w-3.5 h-3.5" />
+              <span>General & Account</span>
+            </TabsTrigger>
+            <TabsTrigger value="agent" className="gap-1.5 text-xs font-semibold px-3 py-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>Agent Settings</span>
+            </TabsTrigger>
+            <TabsTrigger value="google" className="gap-1.5 text-xs font-semibold px-3 py-1.5">
+              <Mail className="w-3.5 h-3.5" />
+              <span>Google Workspace</span>
+            </TabsTrigger>
+            <TabsTrigger value="health" className="gap-1.5 text-xs font-semibold px-3 py-1.5">
+              <Activity className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Integration Health</span>
+            </TabsTrigger>
+            <TabsTrigger value="templates" className="gap-1.5 text-xs font-semibold px-3 py-1.5">
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Recruiting Templates</span>
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="gap-1.5 text-xs font-semibold px-3 py-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              <span>Audit Trail</span>
+            </TabsTrigger>
+          </TabsList>
 
-        {/* 2. Google Workspace & Gmail Sync Integration */}
-        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
-          <CardHeader className="flex flex-row items-start justify-between pb-3">
-            <div className="space-y-0.5">
-              <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-                <Mail className="h-4 w-4 text-primary" />
-                <span>Google Workspace Integration</span>
-              </CardTitle>
-              <CardDescription className="text-xs text-muted-foreground">
-                OAuth2 offline authorization for automated candidate resume ingestion and scheduling
-              </CardDescription>
-            </div>
-            {isGoogleStatusLoading ? (
-              <Skeleton className="h-6 w-20" />
-            ) : (
-              <Badge
-                className={`text-[11px] font-medium capitalize ${
-                  googleStatus?.is_connected
-                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                    : "bg-muted text-muted-foreground border-border"
-                }`}
-              >
-                {googleStatus?.is_connected ? "Connected" : "Not Connected"}
-              </Badge>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-5 text-xs">
-            {isGoogleStatusLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-20 w-full" />
-              </div>
-            ) : googleStatus?.is_connected ? (
-              <div className="space-y-4">
-                {/* ── Reconnect Needed Banner ─────────────────────────────────── */}
-                {googleStatus.reconnect_needed && (
-                  <div className="p-4 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 font-semibold text-xs">
-                        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                        <span>Google Workspace Reconnect Needed</span>
+          {/* ── TAB 1: GENERAL & ACCOUNT ──────────────────────────────────── */}
+          <TabsContent value="general" className="space-y-5">
+            {/* User Profile Card */}
+            <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+              <CardHeader className="pb-3 border-b border-border/50">
+                <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                  <UserIcon className="h-4 w-4 text-primary" />
+                  <span>Recruiter Profile & Session</span>
+                </CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Your authenticated identity and Supabase session credentials
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-4">
+                {isUserLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-4 w-72" />
+                  </div>
+                ) : user ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+                      <span className="text-[11px] text-muted-foreground font-medium">Email Address</span>
+                      <p className="font-semibold text-foreground truncate">{user.email}</p>
+                    </div>
+                    <div className="p-3.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+                      <span className="text-[11px] text-muted-foreground font-medium">Recruiter Identifier (UUID)</span>
+                      <p className="font-mono text-[11px] text-foreground truncate">{user.id}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No active session.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Appearance & Theme Selector */}
+            <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+              <CardHeader className="pb-3 border-b border-border/50">
+                <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                  <Sun className="h-4 w-4 text-primary" />
+                  <span>Interface Theme & Styling</span>
+                </CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Choose between Light, Dark, or System visual mode
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { key: "light" as const, label: "Light", icon: Sun, desc: "Crisp neutral canvas" },
+                    { key: "dark" as const, label: "Dark", icon: Moon, desc: "High contrast dark mode" },
+                    { key: "system" as const, label: "System", icon: Monitor, desc: "Matches OS preferences" },
+                  ].map((t) => {
+                    const IconComp = t.icon;
+                    const isSelected = theme === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        onClick={() => setTheme(t.key)}
+                        className={`p-3.5 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? "bg-primary/[0.04] border-primary shadow-xs ring-1 ring-primary/30"
+                            : "bg-card border-border/70 hover:border-border hover:bg-muted/30"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <IconComp className={`w-4 h-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                          {isSelected && <Check className="w-3.5 h-3.5 text-primary" />}
+                        </div>
+                        <span className="text-xs font-semibold text-foreground block">{t.label}</span>
+                        <span className="text-[11px] text-muted-foreground">{t.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Sign Out Card */}
+            <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+              <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold text-foreground">Sign Out of TalentFlow</span>
+                  <p className="text-[11px] text-muted-foreground">
+                    End your active session securely.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLogout}
+                  className="gap-1.5 text-xs text-destructive hover:bg-destructive/10 border-destructive/20 h-8"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Log Out</span>
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── TAB 2: GOOGLE WORKSPACE ───────────────────────────────────── */}
+          <TabsContent value="google" className="space-y-5">
+            <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+              <CardHeader className="flex flex-row items-start justify-between pb-3 border-b border-border/50">
+                <div className="space-y-0.5">
+                  <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-primary" />
+                    <span>Google Workspace Integration</span>
+                  </CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground">
+                    OAuth2 offline authorization for candidate resume ingestion, Gmail threads, and Google Meet
+                  </CardDescription>
+                </div>
+                {isGoogleStatusLoading ? (
+                  <Skeleton className="h-6 w-20" />
+                ) : (
+                  <Badge
+                    className={`text-[11px] font-medium capitalize ${
+                      googleStatus?.is_connected
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                        : "bg-muted text-muted-foreground border-border"
+                    }`}
+                  >
+                    {googleStatus?.is_connected ? "Connected" : "Not Connected"}
+                  </Badge>
+                )}
+              </CardHeader>
+
+              <CardContent className="space-y-5 pt-4 text-xs">
+                {isGoogleStatusLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-20 w-full" />
+                  </div>
+                ) : googleStatus?.is_connected ? (
+                  <div className="space-y-4">
+                    {/* Reconnect Needed Alert */}
+                    {googleStatus.reconnect_needed && (
+                      <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 font-semibold text-xs">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>Google Permissions Update Needed</span>
+                          </div>
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                            {googleStatus.reconnect_reason || "Additional scopes required for calendar sync."}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => connectMutation.mutate()}
+                          disabled={connectMutation.isPending}
+                          className="bg-amber-600 hover:bg-amber-700 text-white text-xs shrink-0 font-medium h-8 gap-1.5"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${connectMutation.isPending ? "animate-spin" : ""}`} />
+                          <span>Reconnect</span>
+                        </Button>
                       </div>
-                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
-                        {googleStatus.reconnect_reason || "Missing required API permissions or token expired."}
-                      </p>
-                      {googleStatus.missing_scopes && googleStatus.missing_scopes.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1 pt-1">
-                          <span className="text-[10px] font-medium mr-1 text-amber-900 dark:text-amber-200">Missing permissions:</span>
-                          {googleStatus.missing_scopes.map((s) => (
-                            <Badge
-                              key={s}
-                              variant="outline"
-                              className="text-[10px] bg-amber-500/20 border-amber-500/40 text-amber-900 dark:text-amber-200 font-mono py-0 px-1.5"
-                            >
-                              {s.replace("https://www.googleapis.com/auth/", "")}
+                    )}
+
+                    {/* Connected Account Details */}
+                    <div className="p-4 rounded-xl border border-border/70 bg-muted/20 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <span className="text-[11px] text-muted-foreground font-medium">Linked Account</span>
+                          <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                            <span>{googleStatus.email}</span>
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => syncMutation.mutate()}
+                            disabled={syncMutation.isPending}
+                            className="h-8 text-xs gap-1.5 font-medium"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                            <span>{syncMutation.isPending ? "Syncing..." : "Sync Resumes Now"}</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => disconnectMutation.mutate()}
+                            disabled={disconnectMutation.isPending}
+                            className="h-8 text-xs gap-1.5 text-destructive hover:bg-destructive/10"
+                          >
+                            <Unlink className="h-3.5 w-3.5" />
+                            <span>Disconnect</span>
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Scopes */}
+                      <div className="pt-2 border-t border-border/60 space-y-1.5">
+                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <ShieldCheck className="h-3 w-3 text-primary" />
+                          <span>Authorized Scopes (Fernet Encrypted at Rest)</span>
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {googleStatus.scopes.map((scope) => (
+                            <Badge key={scope} variant="secondary" className="text-[10px] font-mono px-2 py-0.5">
+                              {scope.replace("https://www.googleapis.com/auth/", "")}
                             </Badge>
                           ))}
                         </div>
-                      )}
+                      </div>
                     </div>
+
+                    {/* Filter Settings Form */}
+                    <div className="p-4 rounded-xl border border-border/70 bg-card space-y-4">
+                      <h3 className="text-xs font-bold text-foreground flex items-center gap-2">
+                        <Filter className="w-3.5 h-3.5 text-primary" />
+                        <span>Resume Ingestion Filters & Auto-Reply Rules</span>
+                      </h3>
+
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-foreground block mb-1">
+                            Gmail Search Query
+                          </label>
+                          <input
+                            type="text"
+                            value={filterQuery}
+                            onChange={(e) => setFilterQuery(e.target.value)}
+                            className="w-full bg-background border border-input rounded-lg px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-medium text-foreground block mb-1">
+                              Default Job Opening
+                            </label>
+                            <select
+                              value={defaultOpeningId}
+                              onChange={(e) => setDefaultOpeningId(e.target.value)}
+                              className="w-full bg-background border border-input rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                            >
+                              <option value="">Unassigned (Route to General)</option>
+                              {activeOpenings.map((op) => (
+                                <option key={op.id} value={op.id}>
+                                  {op.title}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                            <div className="space-y-0.5">
+                              <span className="text-xs font-medium text-foreground block">
+                                Automated &ldquo;CV Received&rdquo; Auto-Reply
+                              </span>
+                              <p className="text-[10px] text-muted-foreground">
+                                Dispatches acknowledgment email from HR Gmail
+                              </p>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={autoReplyEnabled}
+                              onChange={(e) => setAutoReplyEnabled(e.target.checked)}
+                              className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="pt-2 flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => saveSettingsMutation.mutate()}
+                            disabled={saveSettingsMutation.isPending}
+                            className="gap-1.5 text-xs font-semibold"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Save Filter Preferences</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-8 text-center border border-dashed rounded-xl space-y-3">
+                    <Mail className="w-8 h-8 text-muted-foreground mx-auto" />
+                    <h3 className="text-xs font-semibold text-foreground">Connect Google Workspace</h3>
+                    <p className="text-[11px] text-muted-foreground max-w-md mx-auto">
+                      Link your corporate Google account to enable automated CV syncing from Gmail, Google Meet interview scheduling, and bidirectional thread updates.
+                    </p>
                     <Button
                       size="sm"
                       onClick={() => connectMutation.mutate()}
                       disabled={connectMutation.isPending}
-                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs shrink-0 font-medium h-8 gap-1.5"
+                      className="gap-1.5 text-xs font-semibold"
                     >
-                      <RefreshCw className={`h-3.5 w-3.5 ${connectMutation.isPending ? "animate-spin" : ""}`} />
-                      <span>{connectMutation.isPending ? "Connecting..." : "Reconnect Google"}</span>
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Connect with Google</span>
                     </Button>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-                {/* Connected Account Details */}
-                <div className="p-3.5 rounded-lg border bg-muted/20 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <span className="text-[11px] text-muted-foreground font-medium">Linked Google Account</span>
-                      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                        <span>{googleStatus.email}</span>
-                      </p>
+          {/* ── TAB 3: INTEGRATION HEALTH ─────────────────────────────────── */}
+          <TabsContent value="health" className="space-y-5">
+            {/* Database & Runtime Health Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* PostgreSQL Database Live Ping */}
+              <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+                <CardHeader className="pb-3 border-b border-border/50">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                      <Database className="w-4 h-4 text-primary" />
+                      <span>PostgreSQL Database</span>
+                    </CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => refetchDbHealth()}
+                      disabled={isDbHealthFetching}
+                      className="h-7 w-7 p-0"
+                      title="Ping Database"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isDbHealthFetching ? "animate-spin" : ""}`} />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-3 text-xs">
+                  {isDbHealthLoading ? (
+                    <Skeleton className="h-16 w-full" />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-3 rounded-lg border border-border/70 bg-muted/20">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Latency</span>
+                        <p className="text-base font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                          {dbHealth?.latency_ms ?? 0} ms
+                        </p>
+                      </div>
+                      <div className="p-3 rounded-lg border border-border/70 bg-muted/20">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Connection Mode</span>
+                        <p className="text-xs font-mono font-semibold text-foreground mt-1 capitalize">
+                          {dbHealth?.mode ?? "Session Pooler"}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => syncMutation.mutate()}
-                        disabled={syncMutation.isPending}
-                        className="h-8 text-xs gap-1.5 font-medium"
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    Connected to Supabase PostgreSQL cluster with connection pool health verified.
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Pinecone Vector Database & Fast Response Cache */}
+              <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+                <CardHeader className="pb-3 border-b border-border/50">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-500" />
+                      <span>Pinecone Vector Cache</span>
+                    </CardTitle>
+                    <div className="flex items-center gap-1.5">
+                      <Badge
+                        variant={pineconeHealth?.is_connected ? "success" : "warning"}
+                        className="text-[10px] font-mono px-2 py-0"
                       >
-                        <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                        <span>{syncMutation.isPending ? "Syncing Resumes..." : "Sync Now"}</span>
-                      </Button>
+                        {pineconeHealth?.is_connected ? "Connected" : (pineconeHealth?.status || "Checking")}
+                      </Badge>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => disconnectMutation.mutate()}
-                        disabled={disconnectMutation.isPending}
-                        className="h-8 text-xs gap-1.5 text-destructive hover:bg-destructive/10"
+                        onClick={() => refetchPineconeHealth()}
+                        disabled={isPineconeFetching}
+                        className="h-7 w-7 p-0"
+                        title="Ping Pinecone Vector DB"
                       >
-                        <Unlink className="h-3.5 w-3.5" />
-                        <span>Disconnect</span>
+                        <RefreshCw className={`w-3 h-3 ${isPineconeFetching ? "animate-spin" : ""}`} />
                       </Button>
                     </div>
                   </div>
-
-                  {/* Scopes and Security Badges */}
-                  <div className="pt-2 border-t border-border/60 space-y-1.5">
-                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Shield className="h-3 w-3 text-primary" />
-                      <span>Authorized Scopes (Tokens Fernet-Encrypted at Rest)</span>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-3 text-xs">
+                  {isPineconeLoading ? (
+                    <Skeleton className="h-16 w-full" />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-3 rounded-lg border border-border/70 bg-muted/20">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Latency</span>
+                        <p className="text-base font-mono font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                          {pineconeHealth?.latency_ms ?? 0} ms
+                        </p>
+                      </div>
+                      <div className="p-3 rounded-lg border border-border/70 bg-muted/20">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Vectors Stored</span>
+                        <p className="text-base font-mono font-bold text-foreground mt-0.5">
+                          {pineconeHealth?.total_vectors ?? 0}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {googleStatus.scopes.map((scope) => {
-                        const cleanScope = scope.replace("https://www.googleapis.com/auth/", "");
-                        return (
-                          <Badge
-                            key={scope}
-                            variant="secondary"
-                            className="text-[10px] font-mono px-2 py-0.5 font-normal"
-                          >
-                            {cleanScope}
-                          </Badge>
-                        );
-                      })}
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    Index: <code className="font-mono text-[10px] font-bold">{pineconeHealth?.index_name || "job-tracker-cache"}</code> ({pineconeHealth?.cloud || "aws"}:{pineconeHealth?.region || "us-east-1"}, 1024-dim). Ultra-fast semantic response &amp; CV scoring caching enabled.
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Backend System Environment */}
+              <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
+                <CardHeader className="pb-3 border-b border-border/50">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-primary" />
+                      <span>Backend Application</span>
+                    </CardTitle>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      v{backendHealth?.version || "1.0.0"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-3 rounded-lg border border-border/70 bg-muted/20">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold">Status</span>
+                      <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Healthy & Live</span>
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border/70 bg-muted/20">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold">Environment</span>
+                      <p className="text-xs font-mono font-semibold text-foreground mt-1 uppercase">
+                        {backendHealth?.environment || "Development"}
+                      </p>
                     </div>
                   </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    FastAPI asynchronous engine running on Python 3.12 with background task worker queues.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Live AI Models Health Table */}
+            <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-border/50">
+                <div className="space-y-0.5">
+                  <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-500" />
+                    <span>AI Model Inference Health & Latencies</span>
+                  </CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground">
+                    Latency and availability benchmarks for all screening and extraction LLM model chains
+                  </CardDescription>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchAIHealth()}
+                  disabled={isAIRefetching}
+                  className="gap-1.5 text-xs h-8"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isAIRefetching ? "animate-spin" : ""}`} />
+                  <span>Test Latency</span>
+                </Button>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-muted/40 border-b border-border/80 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        <th className="py-2.5 px-4">Task & Role</th>
+                        <th className="py-2.5 px-3">Model Chain</th>
+                        <th className="py-2.5 px-3">Latency</th>
+                        <th className="py-2.5 px-4 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {isAIHealthLoading ? (
+                        <tr>
+                          <td colSpan={4} className="p-4 text-center">
+                            <Skeleton className="h-6 w-full" />
+                          </td>
+                        </tr>
+                      ) : modelList.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-6 text-center text-muted-foreground italic">
+                            No model benchmark telemetry recorded.
+                          </td>
+                        </tr>
+                      ) : (
+                        modelList.map((m, idx) => (
+                          <tr key={idx} className="hover:bg-muted/20 transition-colors">
+                            <td className="py-2.5 px-4">
+                              <span className="font-semibold text-foreground capitalize">
+                                {m.task || m.role || "Screening"}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground">
+                              {m.model}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] font-bold text-foreground">
+                              {m.latency_ms} ms
+                            </td>
+                            <td className="py-2.5 px-4 text-right">
+                              <Badge
+                                variant={m.status === "ok" ? "success" : "destructive"}
+                                className="text-[10px] uppercase font-bold px-1.5 py-0"
+                              >
+                                {m.status === "ok" ? "Healthy" : "Degraded"}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-                {/* Sync Status Stats */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Synced from Gmail</span>
-                    <p className="font-semibold text-emerald-600 dark:text-emerald-400 text-sm flex items-center gap-1.5">
-                      <UserCheck className="h-4 w-4" />
-                      <span>{googleStatus.synced_from_gmail_count ?? 0} Candidates</span>
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Last Synced</span>
-                    <p className="font-medium text-foreground text-xs truncate">
-                      {googleStatus.last_synced_at
-                        ? new Date(googleStatus.last_synced_at).toLocaleString()
-                        : "Never Synced"}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Last Sync Status</span>
-                    <div>
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] capitalize font-medium ${
-                          googleStatus.last_sync_status === "success"
-                            ? "border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
-                            : googleStatus.last_sync_status === "failed" || googleStatus.last_sync_status === "token_revoked"
-                            ? "border-destructive/20 text-destructive bg-destructive/10"
-                            : "text-muted-foreground"
+          {/* ── TAB 4: RECRUITING TEMPLATES (11 Lifecycle Stages + AI Generator) ──── */}
+          <TabsContent value="templates" className="space-y-4">
+            {/* Header & One-Click AI Generator Banner */}
+            <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-foreground">
+                    Candidate Lifecycle Email Templates
+                  </h3>
+                  <Badge variant="outline" className="text-[10px] font-semibold text-primary border-primary/30">
+                    11 Stages
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Short, warm, and human. AI generation runs using your HR profile &amp; tone. Sending never calls AI; it only fills variables deterministically.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  type="button"
+                  onClick={handleSettingsGenerateAllAI}
+                  disabled={isGeneratingAllSettingsAI}
+                  size="sm"
+                  variant="outline"
+                  className="border-primary/40 hover:bg-primary/10 text-primary text-xs font-semibold gap-1.5 shadow-xs"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAllSettingsAI ? "animate-spin" : ""}`} />
+                  <span>{isGeneratingAllSettingsAI ? "Generating 11..." : "Generate All with AI"}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={() => saveSettingsTemplatesMutation.mutate()}
+                  disabled={saveSettingsTemplatesMutation.isPending}
+                  size="sm"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold gap-1.5 shadow-xs"
+                >
+                  <Save className={`w-3.5 h-3.5 ${saveSettingsTemplatesMutation.isPending ? "animate-spin" : ""}`} />
+                  <span>{saveSettingsTemplatesMutation.isPending ? "Saving..." : "Save Templates"}</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* 11 Stages Pill Navigation */}
+            <div className="relative">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+                {LIFECYCLE_TEMPLATES.map((tmpl) => {
+                  const isActive = activeSettingsTemplate === tmpl.key;
+                  const hasCustomBody = Boolean(settingsTemplates[tmpl.key]?.body);
+                  return (
+                    <button
+                      key={tmpl.key}
+                      type="button"
+                      onClick={() => {
+                        setActiveSettingsTemplate(tmpl.key);
+                        setSettingsPreviewMode(false);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1.5 transition-all border ${
+                        isActive
+                          ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                          : "bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground border-border/60"
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          isActive ? "bg-white" : hasCustomBody ? "bg-emerald-500" : "bg-muted-foreground/40"
                         }`}
-                      >
-                        {googleStatus.last_sync_status}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Total Ingested Resumes</span>
-                    <p className="font-semibold text-foreground text-sm">
-                      {googleStatus.total_emails_synced}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border bg-card space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Automatic Sync</span>
-                    <p className="font-semibold text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-1.5 pt-0.5">
-                      <Clock className="h-3.5 w-3.5" />
-                      <span>Every 15 minutes</span>
-                    </p>
-                  </div>
-                </div>
+                      />
+                      <span>{tmpl.shortName}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-                {/* Last Sync Execution Feedback */}
-                {lastSyncResult && (
-                  <div className="p-3.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                      <span className="flex items-center gap-1.5">
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>Recent Sync Outcome: {lastSyncResult.status}</span>
-                      </span>
-                      <span className="font-mono text-[11px] text-muted-foreground">
-                        {new Date(lastSyncResult.last_synced_at).toLocaleTimeString()}
-                      </span>
+            {/* Active Template Card */}
+            {(() => {
+              const currentConfig =
+                LIFECYCLE_TEMPLATES.find((t) => t.key === activeSettingsTemplate) || LIFECYCLE_TEMPLATES[0];
+              const tmpl = settingsTemplates[activeSettingsTemplate] || { subject: "", body: "" };
+
+              const hrInfo = onboardingData?.step_1;
+              const sampleVars: Record<string, string> = {
+                candidate_name: "Alex Morgan",
+                role: onboardingData?.step_2?.job_title || "Senior Software Engineer",
+                company: hrInfo?.company_name || "Our Company",
+                hr_name: hrInfo?.hr_name || "Sarah Jenkins",
+                interview_date: "Thursday, Nov 26",
+                interview_time: "2:30 PM PKT",
+                meet_link: "https://meet.google.com/abc-defg-hij",
+                schedule_link: "https://app.talentflow.ai/schedule/invite-demo",
+                job_details:
+                  "Designing scalable microservices, creating high-performance PostgreSQL queries, and deploying cloud services.",
+                booking_link: "https://app.talentflow.ai/schedule/invite-demo",
+                job_title: onboardingData?.step_2?.job_title || "Senior Software Engineer",
+                company_name: hrInfo?.company_name || "Our Company",
+                signature:
+                  hrInfo?.signature ||
+                  `Warm regards,\n${hrInfo?.hr_name || "Talent Lead"}\n${hrInfo?.company_name || "Our Company"}`,
+              };
+
+              const resolvedSubject = (() => {
+                let s = tmpl.subject || "";
+                Object.entries(sampleVars).forEach(([k, v]) => {
+                  s = s.split(`{${k}}`).join(v);
+                  s = s.split(`{{${k}}}`).join(v);
+                });
+                return s;
+              })();
+
+              const resolvedBody = (() => {
+                let b = tmpl.body || "";
+                Object.entries(sampleVars).forEach(([k, v]) => {
+                  b = b.split(`{${k}}`).join(v);
+                  b = b.split(`{{${k}}}`).join(v);
+                });
+                return b;
+              })();
+
+              return (
+                <Card className="border border-border/80 dark:border-white/[0.08] bg-card shadow-xs rounded-xl overflow-hidden">
+                  <CardHeader className="pb-3 border-b border-border/50">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-bold text-foreground">
+                            {currentConfig.name}
+                          </CardTitle>
+                          <Badge variant="secondary" className="text-[10px] font-mono">
+                            {activeSettingsTemplate}
+                          </Badge>
+                        </div>
+                        <CardDescription className="text-xs text-muted-foreground">
+                          {currentConfig.description}
+                        </CardDescription>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Regenerate this template with AI */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSettingsRegenerateSingleAI(activeSettingsTemplate)}
+                          disabled={regeneratingSettingsKey === activeSettingsTemplate}
+                          className="h-7 text-xs px-2.5 gap-1 border-border/80 hover:border-primary/50 text-foreground"
+                          title="Regenerate this specific template with AI"
+                        >
+                          <RefreshCw
+                            className={`w-3 h-3 text-primary ${
+                              regeneratingSettingsKey === activeSettingsTemplate ? "animate-spin" : ""
+                            }`}
+                          />
+                          <span>
+                            {regeneratingSettingsKey === activeSettingsTemplate ? "Regenerating..." : "Regenerate AI"}
+                          </span>
+                        </Button>
+
+                        {/* Copy Body */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(tmpl.body);
+                            toast({
+                              title: "Template Copied",
+                              description: `Copied "${currentConfig.name}" body to clipboard.`,
+                            });
+                          }}
+                          className="h-7 text-xs px-2.5 gap-1 border-border/80 text-muted-foreground hover:text-foreground"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>Copy</span>
+                        </Button>
+
+                        {/* Edit vs Preview Toggle */}
+                        <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/60 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setSettingsPreviewMode(false)}
+                            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                              !settingsPreviewMode
+                                ? "bg-background text-foreground shadow-xs font-semibold"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSettingsPreviewMode(true)}
+                            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                              settingsPreviewMode
+                                ? "bg-background text-foreground shadow-xs font-semibold"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Preview</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
-                      <div className="p-2 rounded bg-background/50 border">
-                        <span className="text-muted-foreground block">Found</span>
-                        <span className="font-bold text-foreground">{lastSyncResult.messages_found}</span>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4 pt-4">
+                    {!settingsPreviewMode ? (
+                      /* ── EDIT MODE ────────────────────────────────────────── */
+                      <div className="space-y-3.5">
+                        {/* Variable insertion chips */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Insert Dynamic Variable:
+                          </span>
+                          <div className="flex flex-wrap items-center gap-1 text-xs">
+                            {VARIABLE_CHIPS.map((chip) => (
+                              <button
+                                key={chip.token}
+                                type="button"
+                                onClick={() => handleInsertVariableSettings(chip.token)}
+                                className="px-1.5 py-0.5 rounded-md border border-border/80 bg-muted/30 font-mono text-[10px] text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
+                                title={`Insert ${chip.label} into message body`}
+                              >
+                                {chip.token}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Subject Line */}
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-foreground">Subject Line</label>
+                          <Input
+                            value={tmpl.subject}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setSettingsTemplates({
+                                ...settingsTemplates,
+                                [activeSettingsTemplate]: { ...tmpl, subject: e.target.value },
+                              })
+                            }
+                            placeholder="e.g. Got your application for {role} at {company}!"
+                            className="text-xs h-9 bg-background font-medium font-mono"
+                          />
+                        </div>
+
+                        {/* Message Body */}
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-foreground">Message Body</label>
+                          <Textarea
+                            rows={8}
+                            value={tmpl.body}
+                            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                              setSettingsTemplates({
+                                ...settingsTemplates,
+                                [activeSettingsTemplate]: { ...tmpl, body: e.target.value },
+                              })
+                            }
+                            placeholder="Write message body with variables..."
+                            className="text-xs bg-background leading-relaxed font-sans"
+                          />
+                        </div>
                       </div>
-                      <div className="p-2 rounded bg-background/50 border">
-                        <span className="text-muted-foreground block">Processed</span>
-                        <span className="font-bold text-foreground">{lastSyncResult.messages_processed}</span>
-                      </div>
-                      <div className="p-2 rounded bg-background/50 border">
-                        <span className="text-muted-foreground block">Resumes Saved</span>
-                        <span className="font-bold text-foreground">{lastSyncResult.attachments_saved}</span>
-                      </div>
-                      <div className="p-2 rounded bg-background/50 border">
-                        <span className="text-muted-foreground block">Candidates Created</span>
-                        <span className="font-bold text-foreground">{lastSyncResult.candidates_created}</span>
-                      </div>
-                    </div>
-                    {lastSyncResult.errors.length > 0 && (
-                      <div className="pt-2 border-t border-destructive/20 text-destructive text-[11px] space-y-1">
-                        <span className="font-medium">Warnings / Notices:</span>
-                        <ul className="list-disc pl-4 space-y-0.5">
-                          {lastSyncResult.errors.map((err, i) => (
-                            <li key={i}>{err}</li>
-                          ))}
-                        </ul>
+                    ) : (
+                      /* ── PREVIEW MODE ─────────────────────────────────────── */
+                      <div className="space-y-2.5 bg-muted/20 rounded-xl p-3.5 border border-border/60">
+                        <div className="flex items-center justify-between text-[11px] pb-2 border-b border-border/50 text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                            Live Candidate View (Variables Interpolated Deterministically)
+                          </span>
+                          <span className="text-[10px] bg-background px-2 py-0.5 rounded border border-border/60">
+                            Sample: Alex Morgan
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 text-xs">
+                          <div className="flex gap-1.5 text-muted-foreground text-[11px]">
+                            <span className="font-semibold text-foreground/80 w-14 shrink-0">Subject:</span>
+                            <span className="font-medium text-foreground">{resolvedSubject || "(No subject)"}</span>
+                          </div>
+                          <div className="flex gap-1.5 text-muted-foreground text-[11px]">
+                            <span className="font-semibold text-foreground/80 w-14 shrink-0">Recipient:</span>
+                            <span>Alex Morgan &lt;alex.morgan@example.com&gt;</span>
+                          </div>
+                          <div className="flex gap-1.5 text-muted-foreground text-[11px]">
+                            <span className="font-semibold text-foreground/80 w-14 shrink-0">Sender:</span>
+                            <span>{hrInfo?.hr_name || "Talent Lead"} &lt;recruiting@{hrInfo?.company_name ? hrInfo.company_name.toLowerCase().replace(/\s+/g, '') + '.com' : 'company.com'}&gt;</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 pt-2 border-t border-border/50 bg-background/80 rounded-lg p-3 border border-border/60 text-xs text-foreground font-sans whitespace-pre-wrap leading-relaxed">
+                          {resolvedBody || "(No message body content)"}
+                        </div>
                       </div>
                     )}
-                  </div>
-                )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
+          </TabsContent>
 
-                {/* Per-Email Resume Ingestion Results */}
-                {((lastSyncResult?.results && lastSyncResult.results.length > 0) ||
-                  (googleStatus.recent_sync_results && googleStatus.recent_sync_results.length > 0)) && (
-                  <div className="p-3.5 rounded-lg border bg-card space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-medium text-foreground text-xs">
-                        <FileText className="h-4 w-4 text-primary" />
-                        <span>Recent Gmail Resume Ingestion Outcomes</span>
-                      </div>
-                      <Badge variant="outline" className="text-[10px]">
-                        {(lastSyncResult?.results || googleStatus.recent_sync_results || []).length} Synced Emails
-                      </Badge>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[11px] text-left border-collapse">
-                        <thead>
-                          <tr className="border-b text-muted-foreground">
-                            <th className="pb-1.5 font-medium">Outcome</th>
-                            <th className="pb-1.5 font-medium">Email Details</th>
-                            <th className="pb-1.5 font-medium">Job Opening</th>
-                            <th className="pb-1.5 font-medium">Result & Details</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/40">
-                          {(lastSyncResult?.results || googleStatus.recent_sync_results || []).map((item, idx) => {
-                            const isCreated = item.status === "created";
-                            const isDuplicate = item.status === "duplicate";
-                            return (
-                              <tr key={item.message_id || idx} className="hover:bg-muted/30">
-                                <td className="py-2.5 pr-2 whitespace-nowrap align-top">
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-[10px] font-medium capitalize ${
-                                      isCreated
-                                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                        : isDuplicate
-                                        ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
-                                        : "bg-destructive/10 text-destructive border-destructive/20"
-                                    }`}
-                                  >
-                                    {isCreated ? "Created" : isDuplicate ? "Duplicate / Updated" : "Failed"}
-                                  </Badge>
-                                </td>
-                                <td className="py-2.5 pr-2 max-w-[220px] align-top">
-                                  <p className="font-semibold text-foreground truncate">{item.subject || "No Subject"}</p>
-                                  <p className="text-[10px] text-muted-foreground truncate">{item.sender || "Unknown Sender"}</p>
-                                </td>
-                                <td className="py-2.5 pr-2 text-foreground truncate max-w-[150px] align-top">
-                                  {item.opening_title || "General Applications"}
-                                </td>
-                                <td className="py-2.5 text-muted-foreground align-top">
-                                  <span>{item.reason}</span>
-                                  {item.candidate_id && (
-                                    <a
-                                      href={`/pipeline?candidate_id=${item.candidate_id}`}
-                                      className="ml-2 text-primary hover:underline font-medium inline-flex items-center gap-0.5"
-                                    >
-                                      View in Pipeline &rarr;
-                                    </a>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+          {/* ── TAB 5: AUDIT TRAIL ────────────────────────────────────────── */}
+          <TabsContent value="audit" className="space-y-4">
+            <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl overflow-hidden">
+              <CardHeader className="pb-3 border-b border-border/50">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-primary" />
+                      <span>Recruiter Audit Trail & Activity Log</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs text-muted-foreground">
+                      Chronological history of candidate stage updates, email deliveries, and recruiter actions
+                    </CardDescription>
                   </div>
-                )}
 
-                {/* Filter Settings Configuration */}
-                <div className="p-3.5 rounded-lg border bg-card space-y-3">
-                  <div className="flex items-center gap-1.5 font-medium text-foreground">
-                    <Filter className="h-3.5 w-3.5 text-primary" />
-                    <span>Recruiter Resume Ingestion Filters</span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="sync_query" className="text-[11px] text-muted-foreground">
-                        Gmail Search Query
-                      </Label>
-                      <Input
-                        id="sync_query"
-                        value={filterQuery}
-                        onChange={(e) => setFilterQuery(e.target.value)}
-                        placeholder="has:attachment (filename:pdf OR filename:docx) newer_than:30d"
-                        className="text-xs h-8 font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="sync_label" className="text-[11px] text-muted-foreground">
-                        Gmail Label
-                      </Label>
-                      <Input
-                        id="sync_label"
-                        value={filterLabel}
-                        onChange={(e) => setFilterLabel(e.target.value)}
-                        placeholder="INBOX"
-                        className="text-xs h-8 font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label htmlFor="default_opening" className="text-[11px] text-muted-foreground">
-                        Default Job Opening (for resumes without a matching subject title)
-                      </Label>
-                      <select
-                        id="default_opening"
-                        value={defaultOpeningId}
-                        onChange={(e) => setDefaultOpeningId(e.target.value)}
-                        className="w-full text-xs h-8 px-2.5 rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-                      >
-                        <option value="">-- Automatically select latest active opening --</option>
-                        {activeOpenings.map((op) => (
-                          <option key={op.id} value={op.id}>
-                            {op.title}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Automatic CV Received Auto-Reply Toggle */}
-                    <div className="sm:col-span-2 pt-2 border-t">
-                      <div className="flex items-center justify-between p-2.5 rounded-md border bg-muted/20">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-foreground">
-                              Automatic &quot;CV Received&quot; Confirmation Email
-                            </span>
-                            <Badge variant={autoReplyEnabled ? "outline" : "secondary"} className="text-[10px] h-4 px-1.5 font-normal">
-                              {autoReplyEnabled ? "Active" : "Disabled"}
-                            </Badge>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground">
-                            When enabled, HR automatically sends an acknowledgement email to applicant with the &quot;Initial Message&quot; template upon CV ingestion.
-                          </p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
-                          <input
-                            type="checkbox"
-                            checked={autoReplyEnabled}
-                            onChange={(e) => setAutoReplyEnabled(e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-8 h-4 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex justify-end pt-1">
+                  <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => saveSettingsMutation.mutate()}
-                      disabled={saveSettingsMutation.isPending}
-                      className="h-7 text-xs gap-1.5"
+                      onClick={() => refetchAudit()}
+                      disabled={isAuditFetching}
+                      className="gap-1.5 text-xs h-8"
                     >
-                      <Save className="h-3 w-3" />
-                      <span>{saveSettingsMutation.isPending ? "Saving..." : "Save Settings"}</span>
+                      <RefreshCw className={`w-3 h-3 ${isAuditFetching ? "animate-spin" : ""}`} />
+                      <span>Refresh</span>
                     </Button>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="p-4 rounded-lg border bg-muted/10 space-y-4">
-                <div className="space-y-1.5">
-                  <p className="font-medium text-foreground text-xs">
-                    Connect your Google Workspace account for seamless recruiting automation:
-                  </p>
-                  <ul className="space-y-1.5 text-muted-foreground text-[11px]">
-                    <li className="flex items-center gap-2">
-                      <Mail className="h-3.5 w-3.5 text-primary" />
-                      <span>
-                        <strong>Gmail Sync:</strong> Automatically fetch incoming CV attachments (PDF/DOCX) and import candidates into your pipeline.
-                      </span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Calendar className="h-3.5 w-3.5 text-primary" />
-                      <span>
-                        <strong>Google Calendar:</strong> Sync interview slots and inspect free/busy recruiter schedules.
-                      </span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <FileSpreadsheet className="h-3.5 w-3.5 text-primary" />
-                      <span>
-                        <strong>Google Sheets:</strong> Export candidate rankings and interview shortlists.
-                      </span>
-                    </li>
-                  </ul>
-                </div>
 
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border/60">
-                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <KeyRound className="h-3.5 w-3.5 text-primary" />
-                    <span>Tokens are symmetrically encrypted with Fernet (AES-128-CBC) before storage.</span>
+                {/* Audit Search & Action Filter Bar */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 pt-3">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={auditSearchQuery}
+                      onChange={(e) => setAuditSearchQuery(e.target.value)}
+                      placeholder="Filter by candidate, requisition, action..."
+                      className="w-full bg-background border border-input rounded-lg pl-9 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => connectMutation.mutate()}
-                    disabled={connectMutation.isPending}
-                    className="h-8 text-xs gap-2 font-medium"
+
+                  <select
+                    value={auditActionFilter}
+                    onChange={(e) => setAuditActionFilter(e.target.value)}
+                    className="bg-background border border-input rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span>{connectMutation.isPending ? "Connecting..." : "Connect Google Workspace"}</span>
-                  </Button>
+                    <option value="all">All Actions</option>
+                    <option value="stage_update">Stage Updates</option>
+                    <option value="auto_reply_sent">Emails Sent</option>
+                    <option value="screening_scored">Screening Evaluations</option>
+                    <option value="candidate_created">Candidate Ingestions</option>
+                  </select>
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </CardHeader>
 
-        {/* 3. Theme Preferences */}
-        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-              <Sun className="h-4 w-4 text-amber-500" />
-              <span>Appearance & Theme</span>
-            </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground">
-              Customize the visual palette of your dashboard interface
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-2.5 max-w-md">
-              <Button
-                variant={theme === "light" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setTheme("light")}
-                className="text-xs h-8 gap-2 font-medium"
-              >
-                <Sun className="h-3.5 w-3.5" />
-                <span>Light</span>
-              </Button>
-              <Button
-                variant={theme === "dark" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setTheme("dark")}
-                className="text-xs h-8 gap-2 font-medium"
-              >
-                <Moon className="h-3.5 w-3.5" />
-                <span>Dark</span>
-              </Button>
-              <Button
-                variant={theme === "system" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setTheme("system")}
-                className="text-xs h-8 gap-2 font-medium"
-              >
-                <Monitor className="h-3.5 w-3.5" />
-                <span>System</span>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 4. AI Models Health Monitor */}
-        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div className="space-y-0.5">
-              <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-                <Cpu className="h-4 w-4 text-primary" />
-                <span>OpenRouter AI Models Health</span>
-              </CardTitle>
-              <CardDescription className="text-xs text-muted-foreground">
-                Live health, latency, and error diagnostics across configured model chains
-              </CardDescription>
-            </div>
-            <Button
-              id="btn-check-ai-models"
-              variant="outline"
-              size="sm"
-              onClick={() => refetchAIHealth()}
-              disabled={isAIRefetching}
-              className="h-8 text-xs gap-1.5"
-            >
-              <RefreshCw className={`h-3 w-3 ${isAIRefetching ? "animate-spin" : ""}`} />
-              <span>Check AI models</span>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {isAIHealthLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <Skeleton key={i} className="h-10 w-full rounded-md" />
-                ))}
-              </div>
-            ) : !aiHealth?.models ? (
-              <p className="text-xs text-muted-foreground">Model status unavailable.</p>
-            ) : (
-              <div className="border border-border/70 dark:border-white/[0.08] rounded-xl overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-border/70 bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-                      <th className="py-2.5 px-3">Model</th>
-                      <th className="py-2.5 px-3">Chain / Task</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3">Latency</th>
-                      <th className="py-2.5 px-3">Error / Diagnostics</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {(Array.isArray(aiHealth.models)
-                      ? aiHealth.models
-                      : (Object.values(aiHealth.models) as ModelHealthItem[])
-                    ).map((m: ModelHealthItem) => (
-                      <tr key={m.model} className="hover:bg-muted/30 transition">
-                        <td className="py-2.5 px-3 font-mono font-medium text-foreground">
-                          {m.model}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                            {m.task || m.role || "Task"}
-                          </Badge>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <Badge
-                            className={`text-[10px] capitalize font-medium ${
-                              m.status === "ok"
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                : "bg-destructive/10 text-destructive border-destructive/20"
-                            }`}
-                          >
-                            {m.status === "ok" ? "OK" : "FAIL"}
-                          </Badge>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-muted-foreground">
-                          {m.latency_ms ? `${m.latency_ms.toFixed(0)} ms` : "—"}
-                        </td>
-                        <td className="py-2.5 px-3 text-muted-foreground text-[11px]">
-                          {m.status === "ok" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">Ready</span>
-                          ) : (
-                            <div className="space-y-0.5">
-                              {m.error_type && (
-                                <Badge variant="destructive" className="text-[9px] uppercase font-mono mr-1">
-                                  {m.error_type}
-                                </Badge>
+              <CardContent className="p-0">
+                {isAuditLoading ? (
+                  <div className="p-6 space-y-3">
+                    <Skeleton className="h-6 w-full" />
+                    <Skeleton className="h-6 w-full" />
+                    <Skeleton className="h-6 w-full" />
+                  </div>
+                ) : filteredAuditLogs.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground space-y-1">
+                    <Clock className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                    <p className="text-xs font-semibold">No audit events found</p>
+                    <p className="text-[11px]">
+                      Candidate pipeline transitions and outreach events will be logged here automatically.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-muted/40 border-b border-border/80 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          <th className="py-2.5 px-4 w-36">Action</th>
+                          <th className="py-2.5 px-3 min-w-[160px]">Candidate & Opening</th>
+                          <th className="py-2.5 px-3 min-w-[140px]">Transition</th>
+                          <th className="py-2.5 px-3 min-w-[200px]">Details</th>
+                          <th className="py-2.5 px-4 text-right w-36">Timestamp</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {filteredAuditLogs.map((log) => (
+                          <tr key={log.id} className="hover:bg-muted/20 transition-colors">
+                            <td className="py-2.5 px-4">
+                              <Badge variant="outline" className="text-[10px] font-mono capitalize px-1.5 py-0">
+                                {log.action.replace(/_/g, " ")}
+                              </Badge>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="font-semibold text-foreground block">
+                                {log.candidate_name || "—"}
+                              </span>
+                              {log.opening_title && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {log.opening_title}
+                                </span>
                               )}
-                              <span>{m.error || "Request failed"}</span>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 5. Infrastructure Health */}
-        <Card className="border border-border/70 dark:border-white/[0.08] shadow-card rounded-xl">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-sm font-semibold tracking-tight flex items-center gap-2">
-                <Database className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                <span>Backend & Database Infrastructure</span>
-              </CardTitle>
-              <CardDescription className="text-xs text-muted-foreground">
-                FastAPI service layer and Supabase PostgreSQL connection
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                refetchBackendHealth();
-                refetchDbHealth();
-              }}
-              disabled={isDbHealthFetching || isHealthLoading}
-              className="text-xs h-7 px-2.5 gap-1.5"
-            >
-              <RefreshCw className={`h-3 w-3 ${isDbHealthFetching ? "animate-spin" : ""}`} />
-              Test Now
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-2 text-xs">
-            <div className="flex items-center justify-between py-1.5 border-b border-border/60">
-              <span className="text-muted-foreground">FastAPI Backend Status</span>
-              <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px]">
-                {backendHealth?.status || "Online"}
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between py-1.5 border-b border-border/60">
-              <span className="text-muted-foreground">Supabase PostgreSQL Connection</span>
-              <div className="flex items-center gap-2">
-                {dbHealth?.latency_ms !== undefined && (
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] ${
-                      dbHealth.latency_ms < 150
-                        ? "text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
-                        : dbHealth.latency_ms < 400
-                        ? "text-amber-600 border-amber-500/30 bg-amber-500/10"
-                        : "text-rose-600 border-rose-500/30 bg-rose-500/10"
-                    }`}
-                  >
-                    {dbHealth.latency_ms} ms
-                  </Badge>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {log.from_stage || log.to_stage ? (
+                                <div className="flex items-center gap-1 font-mono text-[10px]">
+                                  <span className="text-muted-foreground">{log.from_stage || "—"}</span>
+                                  <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />
+                                  <span className="font-semibold text-foreground">{log.to_stage || "—"}</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-[11px] text-muted-foreground line-clamp-2">
+                              {log.details || "—"}
+                            </td>
+                            <td className="py-2.5 px-4 text-right font-mono text-[10px] text-muted-foreground">
+                              {new Date(log.created_at).toLocaleDateString()}{" "}
+                              {new Date(log.created_at).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-                <Badge
-                  className={`text-[10px] ${
-                    dbHealth?.status === "connected"
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                      : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
-                  }`}
-                >
-                  {dbHealth?.status === "connected" ? "Connected (Pooler)" : "Unreachable"}
-                </Badge>
-              </div>
-            </div>
-            {dbHealth?.host && (
-              <div className="flex items-center justify-between py-1.5 border-b border-border/60">
-                <span className="text-muted-foreground">Connection Endpoint</span>
-                <span className="font-mono text-muted-foreground text-[11px]">
-                  {dbHealth.host}:{dbHealth.port} ({dbHealth.mode} pooler)
-                </span>
-              </div>
-            )}
-            <div className="flex items-center justify-between py-1.5">
-              <span className="text-muted-foreground">API Version</span>
-              <span className="font-mono text-muted-foreground text-[11px]">
-                {backendHealth?.version || "0.1.0"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        {/* 6. Session Actions */}
-        <div className="pt-2">
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleLogout}
-            className="text-xs h-9 gap-2"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            <span>Sign Out of Account</span>
-          </Button>
-        </div>
+          {/* ── TAB 6: AGENT SETTINGS & TODAY'S ACTIVITY ──────────────────── */}
+          <TabsContent value="agent" className="space-y-5">
+            <AgentControlHub />
+          </TabsContent>
+        </Tabs>
       </div>
     </AppShell>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell title="Settings">
+          <div className="space-y-4 max-w-5xl">
+            <Skeleton className="h-10 w-48" />
+            <Skeleton className="h-64 w-full" />
+          </div>
+        </AppShell>
+      }
+    >
+      <SettingsPageInner />
+    </Suspense>
   );
 }

@@ -452,6 +452,9 @@ export default function CandidateSchedulingPage({
                 <Badge variant="primary" className="text-xs">
                   {pageInfo.opening_title}
                 </Badge>
+                <Badge variant="secondary" className="text-xs capitalize font-medium">
+                  {pageInfo.round_type ? `${pageInfo.round_type.charAt(0).toUpperCase() + pageInfo.round_type.slice(1)} Round` : "Interview"}
+                </Badge>
                 <Badge variant="outline" className="text-xs gap-1">
                   <Clock className="w-3 h-3 text-muted-foreground" />
                   <span>{pageInfo.slot_duration_minutes} mins</span>

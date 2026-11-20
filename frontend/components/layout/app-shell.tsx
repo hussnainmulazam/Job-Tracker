@@ -105,6 +105,12 @@ const NAV_ITEMS = [
     badge: null,
   },
   {
+    label: "Agent Status",
+    href: "/agent",
+    icon: Sparkles,
+    badge: "Live",
+  },
+  {
     label: "Settings",
     href: "/settings",
     icon: Settings,

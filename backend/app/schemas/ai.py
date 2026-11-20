@@ -139,7 +139,9 @@ class ModelHealthItem(BaseModel):
 
 class AIModelsHealthResponse(BaseModel):
     status: str = Field(..., description="'healthy', 'degraded', 'unhealthy', or 'unconfigured'")
-    openrouter_base_url: str = Field(..., description="OpenRouter API base URL")
+    openrouter_base_url: Optional[str] = Field(default="https://openrouter.ai/api/v1", description="OpenRouter API base URL")
+    grok_base_url: Optional[str] = Field(default=None, description="Grok / Groq API base URL")
+    active_provider: Optional[str] = Field(default="openrouter", description="Active AI provider: groq, xai, or openrouter")
     models: dict[str, ModelHealthItem] = Field(
         default_factory=dict,
         description="Map of model ID to individual health check result",

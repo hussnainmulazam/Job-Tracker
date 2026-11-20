@@ -847,8 +847,9 @@ class GoogleService:
                     ).first()
 
                     if existing_candidate:
-                        # Update candidate with latest resume
-                        existing_candidate.cv_text = extracted_text
+                        # Update candidate with latest resume if provided
+                        if extracted_text and len(extracted_text.strip()) > 30:
+                            existing_candidate.cv_text = extracted_text
                         if attachment_urls:
                             existing_candidate.cv_file_url = attachment_urls[0]
                         if not existing_candidate.extracted_data:
@@ -871,6 +872,42 @@ class GoogleService:
                         existing_candidate.updated_at = datetime.now(timezone.utc)
                         self.session.add(existing_candidate)
 
+                        # Create inbound message in candidate thread
+                        inbound_reply = Message(
+                            candidate_id=existing_candidate.id,
+                            user_id=user_id,
+                            direction=MessageDirection.inbound,
+                            message_type=MessageType.email,
+                            body=(body_text_parts[0] if body_text_parts else snippet) or "Candidate email communication received.",
+                            status=MessageStatus.delivered,
+                            sent_at=datetime.now(timezone.utc),
+                            template_name="candidate_email_reply",
+                            template_variables={
+                                "subject": subject,
+                                "thread_id": msg_data.get("threadId"),
+                                "google_message_id": msg_id,
+                                "attachments": [
+                                    {"filename": fn, "url": u}
+                                    for fn, u in zip(attachment_names, attachment_urls)
+                                ],
+                            },
+                        )
+                        self.session.add(inbound_reply)
+
+                        try:
+                            from app.services.agent_settings_service import agent_settings_service
+                            reply_snippet = ((body_text_parts[0] if body_text_parts else snippet) or "").strip()
+                            agent_settings_service.notify_hr_instant(
+                                session=self.session,
+                                user_id=user_id,
+                                event_type="reply",
+                                candidate_name=existing_candidate.name,
+                                opening_title=target_opening_title,
+                                details=f"Subject: {subject}\n\n{reply_snippet[:400]}",
+                            )
+                        except Exception as alert_err:
+                            logger.warning("Could not send instant reply alert to HR: %s", alert_err)
+
                         stage_name = existing_candidate.stage.value if hasattr(existing_candidate.stage, "value") else str(existing_candidate.stage)
                         results.append(
                             EmailSyncItemResult(
@@ -881,7 +918,7 @@ class GoogleService:
                                 candidate_id=str(existing_candidate.id),
                                 candidate_name=existing_candidate.name,
                                 opening_title=target_opening_title,
-                                reason=f"Candidate profile already exists for '{target_opening_title}' (stage: {stage_name}). Resume updated.",
+                                reason=f"Inbound reply/update synced for '{existing_candidate.name}' ({stage_name}).",
                             )
                         )
                     else:
@@ -917,6 +954,28 @@ class GoogleService:
                         )
                         self.session.add(new_candidate)
                         self.session.flush()
+
+                        # Create initial inbound message in candidate thread
+                        initial_msg = Message(
+                            candidate_id=new_candidate.id,
+                            user_id=user_id,
+                            direction=MessageDirection.inbound,
+                            message_type=MessageType.email,
+                            body=(body_text_parts[0] if body_text_parts else snippet) or f"Hello, please find attached my resume for the {target_opening_title} position.\n\nLooking forward to speaking with you.\n\nBest regards,\n{new_candidate.name}",
+                            status=MessageStatus.delivered,
+                            sent_at=datetime.now(timezone.utc),
+                            template_name="application_submission",
+                            template_variables={
+                                "subject": subject,
+                                "thread_id": msg_data.get("threadId"),
+                                "google_message_id": msg_id,
+                                "attachments": [
+                                    {"filename": fn, "url": u}
+                                    for fn, u in zip(attachment_names, attachment_urls)
+                                ],
+                            },
+                        )
+                        self.session.add(initial_msg)
 
                         # Save social links if present
                         if cand_data:

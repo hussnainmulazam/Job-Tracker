@@ -155,11 +155,17 @@ async def run_matching_job(
                 )
 
                 # Cache results in candidate record
+                from app.services.cv_review_service import compute_recommendation
+                pass_mark = getattr(op, "pass_mark", 80) or 80
+
                 cand.score = eval_res["score"]
                 cand.matched_skills = eval_res["matched_skills"]
                 cand.missing_skills = eval_res["missing_skills"]
                 cand.red_flags = eval_res["red_flags"]
                 cand.summary = eval_res["summary"]
+                ext = dict(cand.extracted_data or {})
+                ext["recommendation"] = compute_recommendation(cand.score, pass_mark)
+                cand.extracted_data = ext
                 cand.updated_at = datetime.now(timezone.utc)
 
                 db_session.add(cand)

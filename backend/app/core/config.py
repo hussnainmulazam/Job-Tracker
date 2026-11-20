@@ -37,6 +37,60 @@ class Settings(BaseSettings):
     MODELS_VISION: str = "nvidia/nemotron-3.5-super-vl:free"
     AI_TIMEOUT_SECONDS: float = 60.0
 
+    # ── Grok / Groq AI Provider (High-Speed Inference) ───────────────────────
+    # Supports GROK_API_KEY, GROk_API_KEY, GROQ_API_KEY, XAI_API_KEY from .env
+    GROK_API_KEY: Optional[str] = None
+    GROk_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    XAI_API_KEY: Optional[str] = None
+    MODELS: Optional[str] = None
+    GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
+    XAI_API_BASE: str = "https://api.x.ai/v1"
+
+    @property
+    def grok_api_key(self) -> Optional[str]:
+        """
+        Extract active Grok / Groq key from environment variables or Settings.
+        Tolerates casing variants (GROK_API_KEY, GROk_API_KEY, GROQ_API_KEY, XAI_API_KEY).
+        """
+        import os
+        candidates = [
+            self.GROK_API_KEY,
+            self.GROk_API_KEY,
+            self.GROQ_API_KEY,
+            self.XAI_API_KEY,
+            os.getenv("GROK_API_KEY"),
+            os.getenv("GROk_API_KEY"),
+            os.getenv("GROQ_API_KEY"),
+            os.getenv("XAI_API_KEY"),
+        ]
+        for c in candidates:
+            if c and str(c).strip() and not str(c).strip().startswith("your_"):
+                return str(c).strip()
+        return None
+
+    @property
+    def grok_provider_details(self) -> tuple[str, str, list[str]]:
+        """
+        Returns (provider_name, base_url, default_models).
+        Detects whether key is Groq (starts with 'gsk_') or xAI Grok (starts with 'xai-').
+        """
+        key = self.grok_api_key or ""
+        configured_model = (self.MODELS or "").strip()
+
+        if key.startswith("xai-"):
+            models = [configured_model] if configured_model else ["grok-2-latest", "grok-beta"]
+            return "xai", self.XAI_API_BASE, models
+
+        # Default / Groq Cloud ('gsk_...')
+        models = []
+        if configured_model:
+            models.append(configured_model)
+        for m in ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+            if m not in models:
+                models.append(m)
+        return "groq", self.GROQ_API_BASE, models
+
     # Deprecated single-model fields for backwards compatibility
     MODEL_CV_TAILOR: Optional[str] = None
     MODEL_INTERVIEW: Optional[str] = None
@@ -82,6 +136,12 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     SUPABASE_STORAGE_BUCKET: str = "resumes"
+
+    # ── Pinecone Vector Database & Fast Semantic Caching ─────────────────────
+    PINECONE_API_KEY: Optional[str] = None
+    PINECONE_INDEX_NAME: str = "job-tracker-cache"
+    PINECONE_HOST: Optional[str] = None
+    PINECONE_EMBED_MODEL: str = "multilingual-e5-large"
 
     # Legacy AI keys (kept for backwards compatibility)
     GEMINI_API_KEY: Optional[str] = None

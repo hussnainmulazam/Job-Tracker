@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, Optional
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
+    from app.models.agent_settings import AgentSettings
     from app.models.application import Application
     from app.models.audit_log import AuditLog
     from app.models.candidate import Candidate
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.job_opening import JobOpening
     from app.models.message import Message
     from app.models.notification import Notification
+    from app.models.onboarding import OnboardingSetup
     from app.models.scorecard import Scorecard
 
 
@@ -64,6 +66,16 @@ class User(SQLModel, table=True):
     scheduling_links: List["SchedulingLink"] = Relationship(back_populates="user", cascade_delete=True)
     audit_logs: List["AuditLog"] = Relationship(back_populates="user", cascade_delete=True)
     notifications: List["Notification"] = Relationship(back_populates="user", cascade_delete=True)
+    onboarding: Optional["OnboardingSetup"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"uselist": False},
+        cascade_delete=True,
+    )
+    agent_settings: Optional["AgentSettings"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"uselist": False},
+        cascade_delete=True,
+    )
 
     # Google integrations
     google_account: Optional["GoogleAccount"] = Relationship(

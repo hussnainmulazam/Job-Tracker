@@ -104,6 +104,23 @@ def update_draft_message(
     )
 
 
+@router.delete(
+    "/drafts/{message_id}",
+    summary="HR skips/dismisses a draft message from the approval queue",
+)
+def skip_draft_message(
+    message_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> dict:
+    """Allows HR to discard/skip an unapproved draft."""
+    return outreach_service.skip_draft(
+        session=session,
+        user_id=current_user.id,
+        message_id=message_id,
+    )
+
+
 @router.post(
     "/approve/{message_id}",
     response_model=ApproveResult,

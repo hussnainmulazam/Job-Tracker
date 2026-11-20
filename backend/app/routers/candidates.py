@@ -278,7 +278,7 @@ def list_candidates(
     min_score: Optional[float] = Query(default=None, ge=0.0, le=100.0),
     search: Optional[str] = Query(default=None),
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=1000),
 ) -> PaginatedCandidates:
     """List candidates belonging to the authenticated recruiter."""
     return candidate_service.list(

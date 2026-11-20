@@ -112,6 +112,9 @@ class CandidateRead(BaseModel):
     red_flags: List[str] = Field(default_factory=list)
     summary: Optional[str] = None
     stage: CandidateStage
+    review_status: str = "pending"
+    review_decision_at: Optional[datetime] = None
+    recommendation: Optional[str] = None
     auto_reply_sent: bool = False
     auto_reply_status: Optional[str] = None
     auto_reply_error: Optional[str] = None
@@ -188,4 +191,60 @@ class CandidateDataExportResponse(BaseModel):
     scheduling_links: List[SchedulingLinkRead] = Field(default_factory=list)
     audit_trail: List[AuditLogRead] = Field(default_factory=list)
     exported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ── CV Review Flow Schemas ───────────────────────────────────────────────────
+
+class CVReviewQueueItem(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    opening_id: uuid.UUID
+    opening_title: str
+    opening_pass_mark: int = 80
+    name: str
+    email: str
+    cv_text: Optional[str] = ""
+    cv_file_url: Optional[str] = None
+    score: Optional[float] = None
+    recommendation: str = "Unscored"  # "Recommended" | "Borderline" | "Not recommended" | "Unscored"
+    matched_skills: List[str] = Field(default_factory=list)
+    missing_skills: List[str] = Field(default_factory=list)
+    red_flags: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    stage: str
+    review_status: str = "pending"
+    review_decision_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CVReviewDecisionRequest(BaseModel):
+    candidate_ids: List[uuid.UUID] = Field(..., min_length=1, description="Candidate IDs to approve or reject")
+    action: str = Field(..., pattern="^(approve|reject)$", description="'approve' or 'reject'")
+    notes: Optional[str] = Field(default=None, description="Optional HR decision notes")
+
+
+class CVReviewDecisionItem(BaseModel):
+    candidate_id: uuid.UUID
+    candidate_name: str
+    action: str
+    status: str  # "approved" | "rejected" | "error"
+    stage: str
+    emails_sent: List[str] = Field(default_factory=list)
+    scheduling_link: Optional[str] = None
+    error: Optional[str] = None
+
+
+class CVReviewDecisionResponse(BaseModel):
+    total_processed: int
+    approved_count: int
+    rejected_count: int
+    results: List[CVReviewDecisionItem]
+
+
+class CVReviewOpeningPassMarkUpdate(BaseModel):
+    pass_mark: int = Field(..., ge=1, le=100, description="Updated pass mark threshold (1-100)")
+
 

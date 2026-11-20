@@ -31,6 +31,7 @@ const formSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters"),
   description: z.string().min(10, "Description must be at least 10 characters"),
   status: z.enum(["draft", "active", "paused", "closed"]),
+  pass_mark: z.coerce.number().min(1, "Pass mark must be at least 1").max(100, "Pass mark cannot exceed 100").default(80),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -56,6 +57,7 @@ export function CreateOpeningDialog({
       title: "",
       description: "",
       status: "active",
+      pass_mark: 80,
     },
   });
 
@@ -128,20 +130,41 @@ export function CreateOpeningDialog({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="status" className="text-xs font-medium">
-              Initial Status
-            </Label>
-            <select
-              id="status"
-              {...register("status")}
-              className="w-full text-xs font-medium h-9 px-3 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="active">Active (Open for applications)</option>
-              <option value="draft">Draft (Private)</option>
-              <option value="paused">Paused (On hold)</option>
-              <option value="closed">Closed</option>
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="status" className="text-xs font-medium">
+                Initial Status
+              </Label>
+              <select
+                id="status"
+                {...register("status")}
+                className="w-full text-xs font-medium h-9 px-3 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="active">Active (Open for applications)</option>
+                <option value="draft">Draft (Private)</option>
+                <option value="paused">Paused (On hold)</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="pass_mark" className="text-xs font-medium flex items-center justify-between">
+                <span>Pass Mark (%)</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Default: 80</span>
+              </Label>
+              <Input
+                id="pass_mark"
+                type="number"
+                min={1}
+                max={100}
+                {...register("pass_mark")}
+                className="text-xs"
+                placeholder="80"
+              />
+              {errors.pass_mark && (
+                <p className="text-[10px] text-destructive">{errors.pass_mark.message}</p>
+              )}
+            </div>
           </div>
 
           <div className="space-y-1.5">

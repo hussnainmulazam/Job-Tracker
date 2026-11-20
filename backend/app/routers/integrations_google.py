@@ -8,7 +8,7 @@ from app.core.dependencies import CurrentUser
 from app.db import SessionDep
 from app.models.google_account import GoogleAccount
 from app.models.job_opening import JobOpening
-from app.models.candidate import Candidate
+from app.models.candidate import Candidate, CandidateStage
 from app.models.message import Message, MessageDirection, MessageStatus, MessageType
 from app.schemas.google import (
     GmailSyncResponse,
@@ -21,6 +21,7 @@ from app.schemas.google import (
     EmailConversationSummary,
     EmailConversationsResponse,
     EmailMessageItem,
+    EmailMessageAttachment,
     EmailThreadResponse,
     EmailReplyRequest,
     EmailAIDraftRequest,
@@ -224,8 +225,10 @@ def list_conversations(
         ).all()
 
         last_msg = msgs[0] if msgs else None
-        is_awaiting = last_msg is not None and last_msg.direction == MessageDirection.inbound
-        has_unread = is_awaiting or (cand.stage == CandidateStage.applied and not msgs)
+        dir_val = (last_msg.direction.value if hasattr(last_msg.direction, "value") else str(last_msg.direction)).lower() if last_msg else "inbound"
+        is_awaiting = last_msg is not None and dir_val == "inbound"
+        cand_stage_str = cand.stage.value if hasattr(cand.stage, "value") else str(cand.stage)
+        has_unread = is_awaiting or (cand_stage_str == "applied" and not msgs)
 
         if is_awaiting:
             awaiting_count += 1
@@ -235,14 +238,23 @@ def list_conversations(
         last_type = "whatsapp" if (last_msg and (last_msg.message_type == MessageType.text or last_msg.message_type == MessageType.template or "whatsapp" in str(last_msg.message_type).lower())) else "email"
         has_att = bool(cand.cv_file_url) or any(bool((m.template_variables or {}).get("attachments")) for m in msgs)
 
+        has_whatsapp = (last_type == "whatsapp") or any(
+            (m.message_type == MessageType.text or m.message_type == MessageType.template or "whatsapp" in str(m.message_type).lower())
+            for m in msgs
+        ) or bool(cand.phone)
+        has_email = (last_type == "email") or any(
+            (m.message_type == MessageType.email or "email" in str(m.message_type).lower())
+            for m in msgs
+        ) or bool(cand.email)
+
         # Apply filter_status: all, unread, awaiting_reply, email, whatsapp
         if filter_status == "unread" and not has_unread:
             continue
         elif filter_status == "awaiting_reply" and not is_awaiting:
             continue
-        elif filter_status == "email" and last_type != "email":
+        elif filter_status == "email" and not has_email:
             continue
-        elif filter_status == "whatsapp" and last_type != "whatsapp":
+        elif filter_status == "whatsapp" and not has_whatsapp:
             continue
 
         subj = None
@@ -262,11 +274,11 @@ def list_conversations(
             candidate_name=cand.name,
             candidate_email=cand.email,
             candidate_phone=cand.phone,
-            candidate_stage=cand.stage.value if hasattr(cand.stage, "value") else str(cand.stage),
+            candidate_stage=cand_stage_str,
             opening_title=openings_map.get(cand.opening_id, "General Applications"),
             last_message_body=body_preview,
             last_message_subject=subj,
-            last_message_direction=last_msg.direction.value if last_msg else "inbound",
+            last_message_direction=dir_val,
             last_message_type=last_type,
             last_message_at=last_msg.created_at if last_msg else cand.created_at,
             unread=has_unread,

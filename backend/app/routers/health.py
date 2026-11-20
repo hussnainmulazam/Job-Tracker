@@ -58,3 +58,14 @@ def health_db_check(session: SessionDep):
             },
         )
 
+
+@router.get("/health/pinecone")
+def health_pinecone_check():
+    """
+    Returns Pinecone vector database connection status, index stats, vector count, and latency.
+    Powers fast candidate similarity matching and semantic response caching.
+    """
+    from app.services.pinecone_service import pinecone_service
+    return pinecone_service.get_status()
+
+

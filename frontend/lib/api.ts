@@ -52,7 +52,11 @@ export type JobOpeningStatus = "draft" | "active" | "paused" | "closed";
 export type CandidateStage =
   | "applied"
   | "screening"
+  | "shortlisted"
+  | "contacted"
+  | "scheduled"
   | "interview"
+  | "interviewed"
   | "offer"
   | "rejected";
 
@@ -65,6 +69,7 @@ export interface JobOpening {
   years_of_experience?: number | null;
   nice_to_haves?: string[];
   status: JobOpeningStatus;
+  pass_mark?: number;
   google_sheet_id?: string | null;
   google_sheet_url?: string | null;
   created_at: string;
@@ -229,6 +234,9 @@ export interface Candidate {
   red_flags: string[];
   summary?: string | null;
   stage: CandidateStage;
+  review_status?: "pending" | "approved" | "rejected";
+  recommendation?: "Recommended" | "Borderline" | "Not recommended" | "Unscored" | null;
+  review_decision_at?: string | null;
   auto_reply_sent?: boolean;
   auto_reply_status?: string | null;
   auto_reply_error?: string | null;
@@ -618,6 +626,7 @@ export const jobOpeningsApi = {
     description: string;
     required_skills: string[];
     status?: JobOpeningStatus;
+    pass_mark?: number;
   }) => api.post<JobOpening>("/api/v1/job-openings", data),
 
   update: (
@@ -627,6 +636,7 @@ export const jobOpeningsApi = {
       description: string;
       required_skills: string[];
       status: JobOpeningStatus;
+      pass_mark: number;
     }>
   ) => api.patch<JobOpening>(`/api/v1/job-openings/${id}`, data),
 
@@ -1041,6 +1051,7 @@ export interface InterviewRead {
   opening_id: string;
   opening_title: string;
   scheduling_link_id?: string | null;
+  round_type?: string;
   title: string;
   start_time: string;
   end_time: string;
@@ -1048,7 +1059,10 @@ export interface InterviewRead {
   google_calendar_event_id?: string | null;
   meet_link?: string | null;
   interviewer_email: string;
-  status: "scheduled" | "rescheduled" | "cancelled" | "completed" | string;
+  status: "scheduled" | "rescheduled" | "cancelled" | "completed" | "passed" | "failed" | "no_show" | string;
+  result_status?: "passed" | "failed" | "no_show" | string | null;
+  feedback?: string | null;
+  result_recorded_at?: string | null;
   cancellation_reason?: string | null;
   cancelled_at?: string | null;
   cancelled_by?: string | null;
@@ -1066,10 +1080,45 @@ export interface PublicSchedulePageInfo {
   candidate_email: string;
   candidate_phone?: string | null;
   opening_title: string;
+  round_type?: string;
   slot_duration_minutes: number;
   default_timezone: string;
   interviewer_email: string;
   existing_interview?: InterviewRead | null;
+}
+
+export interface InterviewResultRequest {
+  result: "passed" | "failed" | "no_show";
+  feedback?: string;
+}
+
+export interface InterviewResultResponse {
+  interview_id: string;
+  result_status: "passed" | "failed" | "no_show";
+  candidate_id: string;
+  candidate_name: string;
+  next_action: string;
+  next_round?: string | null;
+  scheduling_link_token?: string | null;
+  scheduling_link_url?: string | null;
+  offer_draft_ready: boolean;
+}
+
+export interface OfferDraftResponse {
+  candidate_id: string;
+  candidate_name: string;
+  candidate_email: string;
+  opening_id?: string | null;
+  opening_title?: string | null;
+  status: string;
+  subject: string;
+  body: string;
+  sent_at?: string | null;
+}
+
+export interface OfferSendRequest {
+  subject: string;
+  body: string;
 }
 
 export const schedulingApi = {
@@ -1079,7 +1128,7 @@ export const schedulingApi = {
   updateAvailability: (data: AvailabilityScheduleCreateOrUpdate) =>
     api.put<AvailabilityScheduleRead>("/api/v1/scheduling/availability", data),
 
-  createLink: (data: { candidate_id: string; slot_duration_minutes?: number; validity_days?: number }) =>
+  createLink: (data: { candidate_id: string; round_type?: string; slot_duration_minutes?: number; validity_days?: number }) =>
     api.post<SchedulingLinkRead>("/api/v1/scheduling/links", data),
 
   getPublicPage: (token: string) =>
@@ -1132,11 +1181,84 @@ export const schedulingApi = {
 
   cancelInterview: (id: string, data: { reason?: string; cancelled_by?: string }) =>
     api.post<InterviewRead>(`/api/v1/scheduling/interviews/${id}/cancel`, data),
+
+  recordResult: (id: string, data: InterviewResultRequest) =>
+    api.post<InterviewResultResponse>(`/api/v1/scheduling/interviews/${id}/result`, data),
+
+  getOfferDraft: (candidateId: string) =>
+    api.get<OfferDraftResponse>(`/api/v1/scheduling/offer-draft/${candidateId}`),
+
+  sendOfferLetter: (candidateId: string, data: OfferSendRequest) =>
+    api.post<OfferDraftResponse>(`/api/v1/scheduling/offer-draft/${candidateId}/send`, data),
+
+  syncCalendar: () =>
+    api.post<CalendarSyncResponse>("/api/v1/scheduling/sync-calendar"),
+
+  getWeekPreview: (startDate?: string) => {
+    const q = startDate ? `?start_date=${encodeURIComponent(startDate)}` : "";
+    return api.get<AvailabilityWeekPreviewResponse>(`/api/v1/scheduling/availability/week-preview${q}`);
+  },
+
+  getBookingLink: () =>
+    api.get<SchedulingLinkRead>("/api/v1/scheduling/booking-link"),
 };
+
+export interface CalendarBusyEvent {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  start_local: string;
+  end_local: string;
+  date_str: string;
+}
+
+export interface CalendarBookedInterview {
+  id: string;
+  candidate_name: string;
+  candidate_email: string;
+  opening_title: string;
+  start_time: string;
+  end_time: string;
+  start_local: string;
+  end_local: string;
+  date_str: string;
+  meet_link?: string | null;
+  status: string;
+}
+
+export interface CalendarFreeSlot {
+  start_time: string;
+  end_time: string;
+  start_local: string;
+  end_local: string;
+  date_str: string;
+  is_past: boolean;
+}
+
+export interface AvailabilityWeekPreviewResponse {
+  week_start: string;
+  week_end: string;
+  timezone: string;
+  slot_duration_minutes: number;
+  buffer_minutes: number;
+  google_busy_events: CalendarBusyEvent[];
+  platform_interviews: CalendarBookedInterview[];
+  free_slots: CalendarFreeSlot[];
+  booking_link_token: string;
+  booking_link_url: string;
+}
+
+export interface CalendarSyncResponse {
+  synced_count: number;
+  updated_count: number;
+  cancelled_count: number;
+  detail: string;
+}
 
 export interface OutreachDraftRequest {
   candidate_id: string;
-  channel?: "whatsapp" | "email";
+  channel?: "email";
   language?: "english" | "hinglish";
   instructions?: string;
 }
@@ -1227,6 +1349,9 @@ export const outreachApi = {
   updateDraft: (messageId: string, data: { body: string; subject?: string }) =>
     api.put<ApprovalQueueItem>(`/api/v1/outreach/drafts/${messageId}`, data),
 
+  skip: (messageId: string) =>
+    api.delete<{ status: string; message_id: string }>(`/api/v1/outreach/drafts/${messageId}`),
+
   approve: (messageId: string) =>
     api.post<{ message_id: string; status: string; error?: string }>(`/api/v1/outreach/approve/${messageId}`),
 
@@ -1259,7 +1384,311 @@ export interface DbHealthResponse {
   error?: string;
 }
 
+export interface PineconeHealthResponse {
+  status: "connected" | "degraded" | "unconfigured" | "error";
+  is_connected: boolean;
+  index_name: string;
+  host?: string | null;
+  total_vectors: number;
+  dimension: number;
+  latency_ms: number;
+  embedding_model?: string;
+  cloud?: string;
+  region?: string;
+  cache_hits: number;
+  cache_misses: number;
+  cache_mode?: string;
+  message?: string;
+}
+
 export const healthApi = {
   checkDb: () => api.get<DbHealthResponse>("/health/db"),
   checkBackend: () => api.get<{ status: string; database?: string; version: string; environment?: string }>("/health"),
+  checkPinecone: () => api.get<PineconeHealthResponse>("/health/pinecone"),
 };
+
+// ── Onboarding & Setup Wizard ────────────────────────────────────────────────
+
+export interface HRProfileStep {
+  hr_name?: string | null;
+  company_name?: string | null;
+  hr_role?: string | null;
+  email_tone: string;
+  signature?: string | null;
+  completed: boolean;
+}
+
+export interface JobOpeningStep {
+  job_opening_id?: string | null;
+  job_title?: string | null;
+  job_description?: string | null;
+  required_skills: string[];
+  years_of_experience?: number | null;
+  completed: boolean;
+}
+
+export interface AvailabilityStep {
+  timezone: string;
+  slot_duration_minutes: number;
+  buffer_minutes: number;
+  weekly_hours: Record<string, any>;
+  interview_rounds: Array<{ round_name: string; duration_minutes: number }>;
+  completed: boolean;
+}
+
+export interface TemplatesStep {
+  templates: Record<string, { subject: string; body: string }>;
+  completed: boolean;
+}
+
+export interface OnboardingStatusResponse {
+  id: string;
+  current_step: number;
+  is_completed: boolean;
+  agent_started: boolean;
+  can_start_agent: boolean;
+  completed_steps_count: number;
+  total_steps: number;
+  progress_percentage: number;
+  step_1: HRProfileStep;
+  step_2: JobOpeningStep;
+  step_3: AvailabilityStep;
+  step_4: TemplatesStep;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneratedTemplatesResponse {
+  templates: Record<string, { name?: string; subject: string; body: string }>;
+  generated_with_ai: boolean;
+  model_used?: string | null;
+  latency_seconds?: number | null;
+}
+
+export interface TemplatePreviewResponse {
+  resolved_subject: string;
+  resolved_body: string;
+}
+
+export const onboardingApi = {
+  getStatus: () => api.get<OnboardingStatusResponse>("/api/v1/onboarding"),
+
+  saveStep1: (data: {
+    hr_name: string;
+    company_name: string;
+    hr_role: string;
+    email_tone: string;
+    signature?: string | null;
+  }) => api.post<OnboardingStatusResponse>("/api/v1/onboarding/step/1", data),
+
+  saveStep2: (data: {
+    job_title: string;
+    job_description: string;
+    required_skills: string[];
+    years_of_experience?: number | null;
+    job_opening_id?: string | null;
+  }) => api.post<OnboardingStatusResponse>("/api/v1/onboarding/step/2", data),
+
+  saveStep3: (data: {
+    timezone: string;
+    slot_duration_minutes: number;
+    buffer_minutes: number;
+    weekly_hours: Record<string, any>;
+    interview_rounds: Array<{ round_name: string; duration_minutes: number }>;
+  }) => api.post<OnboardingStatusResponse>("/api/v1/onboarding/step/3", data),
+
+  saveStep4: (data: {
+    templates: Record<string, { subject: string; body: string; name?: string }>;
+  }) => api.post<OnboardingStatusResponse>("/api/v1/onboarding/step/4", data),
+
+  generateTemplates: (data: {
+    hr_name?: string;
+    company_name?: string;
+    hr_role?: string;
+    email_tone?: string;
+    single_template_key?: string;
+  }) => api.post<GeneratedTemplatesResponse>("/api/v1/onboarding/generate-templates", data),
+
+  previewTemplate: (data: {
+    subject: string;
+    body: string;
+    candidate_name?: string;
+    role?: string;
+    company?: string;
+    hr_name?: string;
+    interview_date?: string;
+    interview_time?: string;
+    meet_link?: string;
+    schedule_link?: string;
+    job_details?: string;
+  }) => api.post<TemplatePreviewResponse>("/api/v1/onboarding/preview-template", data),
+
+  startAgent: () =>
+    api.post<{ status: string; agent_started: boolean; message: string }>("/api/v1/onboarding/start-agent"),
+};
+
+// ── CV Review Flow API ───────────────────────────────────────────────────────
+
+export interface CVReviewQueueItem {
+  id: string;
+  user_id: string;
+  opening_id: string;
+  opening_title: string;
+  opening_pass_mark: number;
+  pass_mark?: number;
+  name: string;
+  email: string;
+  cv_text?: string;
+  cv_file_url?: string | null;
+  score?: number | null;
+  recommendation: "Recommended" | "Borderline" | "Not recommended" | "Unscored";
+  matched_skills: string[];
+  missing_skills: string[];
+  red_flags: string[];
+  summary?: string | null;
+  stage: string;
+  review_status: "pending" | "approved" | "rejected";
+  review_decision_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CVReviewDecisionPayload {
+  candidate_ids: string[];
+  action: "approve" | "reject";
+  notes?: string;
+}
+
+export interface CVReviewDecisionResponse {
+  total_processed: number;
+  approved_count: number;
+  rejected_count: number;
+  results: Array<{
+    candidate_id: string;
+    candidate_name: string;
+    action: string;
+    status: string;
+    stage: string;
+    emails_sent: string[];
+    scheduling_link?: string | null;
+    error?: string | null;
+  }>;
+}
+
+export const cvReviewApi = {
+  getQueue: (params?: { opening_id?: string; status?: string; search?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.opening_id && params.opening_id !== "all") searchParams.set("opening_id", params.opening_id);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.search) searchParams.set("search", params.search);
+    const qs = searchParams.toString();
+    return api.get<CVReviewQueueItem[]>(`/api/v1/cv-review/queue${qs ? `?${qs}` : ""}`);
+  },
+
+  decide: (data: CVReviewDecisionPayload) =>
+    api.post<CVReviewDecisionResponse>("/api/v1/cv-review/decision", data),
+
+  scoreCandidate: (candidateId: string, forceRerun: boolean = false) =>
+    api.post<CVReviewQueueItem>(`/api/v1/cv-review/score/${candidateId}?force_rerun=${forceRerun}`),
+
+  updatePassMark: (openingId: string, passMark: number) =>
+    api.patch<JobOpening>(`/api/v1/cv-review/opening/${openingId}/pass-mark`, { pass_mark: passMark }),
+};
+
+// ── Agent Settings & Activity Dashboard API ───────────────────────────────────
+
+export interface AgentSettingsRead {
+  id: string;
+  user_id: string;
+  is_paused: boolean;
+  paused_at?: string | null;
+  paused_reason?: string | null;
+  daily_send_limit: number;
+  sends_today: number;
+  sends_remaining: number;
+  notify_email?: string | null;
+  notify_on_booking: boolean;
+  notify_on_reply: boolean;
+  notify_on_failure: boolean;
+  daily_summary_enabled: boolean;
+  daily_summary_time: string;
+  last_daily_summary_sent_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentSettingsUpdate {
+  is_paused?: boolean;
+  paused_reason?: string;
+  daily_send_limit?: number;
+  notify_email?: string;
+  notify_on_booking?: boolean;
+  notify_on_reply?: boolean;
+  notify_on_failure?: boolean;
+  daily_summary_enabled?: boolean;
+  daily_summary_time?: string;
+}
+
+export interface AgentPauseToggleRequest {
+  paused?: boolean;
+  reason?: string;
+}
+
+export interface AgentActivityFeedItem {
+  id: string;
+  timestamp: string;
+  action: string;
+  category: "cv_review" | "interview" | "outreach" | "system" | "error";
+  title: string;
+  details: string;
+  candidate_id?: string | null;
+  candidate_name?: string | null;
+}
+
+export interface AgentTodayActivityResponse {
+  is_paused: boolean;
+  paused_reason?: string | null;
+  daily_send_limit: number;
+  sends_today: number;
+  sends_remaining: number;
+  cvs_ingested_today: number;
+  cvs_scored_today: number;
+  waiting_for_review: number;
+  interviews_today: number;
+  failures_today: number;
+  feed: AgentActivityFeedItem[];
+}
+
+export interface DailySummarySendRequest {
+  recipient_email?: string;
+  force?: boolean;
+}
+
+export interface DailySummarySendResponse {
+  status: string;
+  recipient: string;
+  sent_at: string;
+  summary: {
+    cvs_received_today: number;
+    candidates_waiting_review: number;
+    interviews_scheduled_today: number;
+    outbound_messages_sent: number;
+    failures_today: number;
+  };
+  preview: string;
+}
+
+export const agentApi = {
+  getSettings: () => api.get<AgentSettingsRead>("/api/v1/agent/settings"),
+  updateSettings: (data: AgentSettingsUpdate) =>
+    api.put<AgentSettingsRead>("/api/v1/agent/settings", data),
+  togglePause: (data?: AgentPauseToggleRequest) =>
+    api.post<AgentSettingsRead>("/api/v1/agent/pause", data || {}),
+  getTodayActivity: () =>
+    api.get<AgentTodayActivityResponse>("/api/v1/agent/today-activity"),
+  sendDailySummary: (data?: DailySummarySendRequest) =>
+    api.post<DailySummarySendResponse>("/api/v1/agent/send-daily-summary", data || {}),
+  testFailureAlert: () =>
+    api.post<{ status: string; message: string }>("/api/v1/agent/test-failure-alert", {}),
+};
+

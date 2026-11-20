@@ -194,12 +194,8 @@ export const KanbanCard = memo(function KanbanCard({
                   e.stopPropagation();
                   onWhatsApp(candidate);
                 }}
-                className={`h-6 w-6 rounded-md flex items-center justify-center transition-colors ${
-                  candidate.phone
-                    ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                    : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/50"
-                }`}
-                title={candidate.phone ? `Chat on WhatsApp (${candidate.phone})` : "No phone number listed"}
+                className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                title="Message on WhatsApp"
               >
                 <MessageCircle className="h-3 w-3" />
               </button>

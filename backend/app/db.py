@@ -63,8 +63,41 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
 
 
 def init_db() -> None:
-    """Create all SQLModel tables in the database."""
+    """Create all SQLModel tables in the database and ensure latest columns exist."""
     SQLModel.metadata.create_all(engine)
+    if "sqlite" not in str(engine.url).lower():
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE job_openings ADD COLUMN IF NOT EXISTS pass_mark integer DEFAULT 80;"))
+            conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS review_status varchar(50) DEFAULT 'pending';"))
+            conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS review_decision_at timestamptz;"))
+            conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS offer_letter_draft json;"))
+            conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS offer_letter_status varchar(50);"))
+            conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS offer_letter_sent_at timestamptz;"))
+            conn.execute(text("ALTER TABLE scheduling_links ADD COLUMN IF NOT EXISTS round_type varchar(64) DEFAULT 'initial';"))
+            conn.execute(text("ALTER TABLE interviews ADD COLUMN IF NOT EXISTS round_type varchar(64) DEFAULT 'initial';"))
+            conn.execute(text("ALTER TABLE interviews ADD COLUMN IF NOT EXISTS result_status varchar(32);"))
+            conn.execute(text("ALTER TABLE interviews ADD COLUMN IF NOT EXISTS feedback text;"))
+            conn.execute(text("ALTER TABLE interviews ADD COLUMN IF NOT EXISTS result_recorded_at timestamptz;"))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS agent_settings (
+                    id uuid PRIMARY KEY,
+                    user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                    is_paused boolean NOT NULL DEFAULT false,
+                    paused_at timestamptz,
+                    paused_reason text,
+                    daily_send_limit integer NOT NULL DEFAULT 50,
+                    notify_email varchar(320),
+                    notify_on_booking boolean NOT NULL DEFAULT true,
+                    notify_on_reply boolean NOT NULL DEFAULT true,
+                    notify_on_failure boolean NOT NULL DEFAULT true,
+                    daily_summary_enabled boolean NOT NULL DEFAULT true,
+                    daily_summary_time varchar(10) NOT NULL DEFAULT '09:00',
+                    last_daily_summary_sent_at timestamptz,
+                    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+            conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:
