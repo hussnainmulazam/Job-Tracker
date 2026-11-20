@@ -32,7 +32,7 @@ import { SetupChecklist } from "@/components/dashboard/setup-checklist";
 import { SetupWizardDialog } from "@/components/setup/setup-wizard-dialog";
 import { StatsHeader } from "@/components/dashboard/stats-header";
 import { HiringFunnelChart } from "@/components/dashboard/hiring-funnel-chart";
-import { ApplicationsTimelineChart } from "@/components/dashboard/applications-timeline-chart";
+import { ApplicationsChart } from "@/components/dashboard/applications-chart";
 import { UpcomingInterviewsList } from "@/components/dashboard/upcoming-interviews-list";
 import { RecentActivityFeed } from "@/components/dashboard/recent-activity-feed";
 import { AddCandidateDialog } from "@/components/candidates/add-candidate-dialog";
@@ -235,7 +235,7 @@ export default function DashboardPage() {
             <HiringFunnelChart stats={stats} isLoading={isLoading} />
           </div>
           <div className="lg:col-span-6">
-            <ApplicationsTimelineChart stats={stats} isLoading={isLoading} />
+            <ApplicationsChart stats={stats} isLoading={isLoading} />
           </div>
         </div>
 

@@ -183,6 +183,12 @@ def _build_status_response(onboarding: OnboardingSetup) -> OnboardingStatusRespo
     status_code=status.HTTP_200_OK,
     summary="Get current recruiter onboarding wizard status & progress",
 )
+@router.get(
+    "/setup",
+    response_model=OnboardingStatusResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Alias: Get current recruiter onboarding wizard status & progress",
+)
 def get_onboarding_status(
     session: SessionDep,
     current_user: CurrentUser,
@@ -190,6 +196,24 @@ def get_onboarding_status(
     """Returns the authenticated recruiter's current onboarding setup checklist state."""
     onboarding = _get_or_create_onboarding(session, current_user.id)
     return _build_status_response(onboarding)
+
+
+@router.get(
+    "/templates",
+    status_code=status.HTTP_200_OK,
+    summary="Get recruiting templates",
+)
+def get_onboarding_templates(
+    session: SessionDep,
+    current_user: CurrentUser,
+):
+    """Returns recruiting email templates for authenticated recruiter."""
+    onboarding = _get_or_create_onboarding(session, current_user.id)
+    return onboarding.templates or _get_default_templates(
+        company_name=onboarding.company_name or "Company",
+        hr_name=onboarding.hr_name or "Recruiting Team",
+        email_tone=onboarding.email_tone or "warm_professional",
+    )
 
 
 # ── POST /onboarding/step/1 ───────────────────────────────────────────────────
