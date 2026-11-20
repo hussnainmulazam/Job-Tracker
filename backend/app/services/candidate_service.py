@@ -742,15 +742,11 @@ class CandidateService:
         ).first()
         job_title = opening.title if opening else "Position"
 
-        subject = f"Application Received: {job_title}"
-        body = (
-            f"Hi {candidate.name},\n\n"
-            f"Thank you for submitting your CV for the {job_title} position.\n\n"
-            f"We have received your application and our recruitment team is reviewing your profile. "
-            f"If your background aligns with our criteria, we will reach out shortly regarding next steps.\n\n"
-            f"Best regards,\n"
-            f"Recruiting & Talent Acquisition Team"
-        )
+        from app.services.pipeline_agent_service import build_pipeline_context
+        from app.services.pipeline_template_service import render_template
+
+        ctx = build_pipeline_context(session, user_id, candidate)
+        subject, html_body, body, _ = render_template("cv_received", ctx)
 
         from app.services.google_service import GoogleService
         from app.schemas.google import GoogleSendEmailRequest
@@ -763,8 +759,8 @@ class CandidateService:
                 request=GoogleSendEmailRequest(
                     candidate_id=candidate.id,
                     subject=subject,
-                    body=body,
-                    template_name="initial_message",
+                    body=html_body,
+                    template_name="cv_received",
                 ),
             )
             candidate.auto_reply_sent = True

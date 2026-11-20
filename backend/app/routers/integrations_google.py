@@ -1,5 +1,6 @@
 """Google Integration Router — status, disconnection, Gmail background sync, email conversations & threads, and sending emails."""
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
@@ -202,6 +203,19 @@ def list_conversations(
     filter_status: Optional[str] = Query(default="all"),
 ) -> EmailConversationsResponse:
     """Lists email conversations grouped by candidate with unread counts and channel filtering."""
+    # Opportunistic background sync: if not synced recently, sync now
+    account = session.exec(
+        select(GoogleAccount).where(GoogleAccount.user_id == current_user.id)
+    ).first()
+    if account and account.access_token and account.last_sync_status != "token_revoked":
+        now_dt = datetime.now(timezone.utc)
+        if not account.last_synced_at or (now_dt - account.last_synced_at).total_seconds() > 20:
+            try:
+                service = GoogleService(session)
+                service.sync_gmail(current_user.id)
+            except Exception:
+                pass
+
     candidates = session.exec(
         select(Candidate)
         .where(Candidate.user_id == current_user.id)
@@ -286,6 +300,12 @@ def list_conversations(
             has_attachments=has_att,
         )
         conversations.append(conv)
+
+    # Sort grouped candidate threads newest first
+    conversations.sort(
+        key=lambda c: c.last_message_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
 
     return EmailConversationsResponse(
         conversations=conversations,

@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _periodic_gmail_sync_worker():
-    """Background task that runs automatic Gmail sync every 15 minutes for connected accounts."""
-    logger.info("Periodic Gmail sync worker initiated (every 15 minutes).")
-    # Initial sleep to allow application to fully start
-    await asyncio.sleep(15)
+    """Background task that runs automatic Gmail sync every 30 seconds for connected accounts."""
+    logger.info("Periodic Gmail sync worker initiated (every 30 seconds).")
+    # Quick initial sleep to allow application to fully start
+    await asyncio.sleep(5)
     while True:
         try:
             from app.models.google_account import GoogleAccount
@@ -60,8 +60,34 @@ async def _periodic_gmail_sync_worker():
         except Exception as exc:
             logger.error("Periodic Gmail sync unexpected loop exception: %s", exc)
 
-        # 15 minutes interval = 900 seconds
-        await asyncio.sleep(900)
+        # 30 seconds interval for real-time conversation sync
+        await asyncio.sleep(30)
+
+
+async def _periodic_pipeline_agent_worker():
+    """Background task that runs autonomous pipeline agent cycles every 30 seconds."""
+    logger.info("Periodic Hiring Pipeline Agent worker initiated (every 30 seconds).")
+    await asyncio.sleep(8)
+    while True:
+        try:
+            from app.models.user import User
+            from app.services.pipeline_agent_service import HiringPipelineAgent
+
+            with Session(engine) as session:
+                users = session.exec(select(User)).all()
+                for u in users:
+                    try:
+                        agent = HiringPipelineAgent(session, u.id)
+                        await agent.process_background_cycles()
+                    except Exception as ag_err:
+                        logger.warning("Pipeline agent cycle error for user %s: %s", u.id, ag_err)
+        except asyncio.CancelledError:
+            logger.info("Periodic Hiring Pipeline Agent worker cancelled.")
+            break
+        except Exception as exc:
+            logger.error("Periodic Pipeline Agent unexpected loop exception: %s", exc)
+
+        await asyncio.sleep(30)
 
 
 @asynccontextmanager
@@ -78,8 +104,10 @@ async def lifespan(app: FastAPI):
             logger.warning("Could not connect to database at startup: %s", exc)
 
     sync_task = None
+    agent_task = None
     if not is_testing:
         sync_task = asyncio.create_task(_periodic_gmail_sync_worker())
+        agent_task = asyncio.create_task(_periodic_pipeline_agent_worker())
 
     yield
 
@@ -87,6 +115,12 @@ async def lifespan(app: FastAPI):
         sync_task.cancel()
         try:
             await sync_task
+        except asyncio.CancelledError:
+            pass
+    if agent_task:
+        agent_task.cancel()
+        try:
+            await agent_task
         except asyncio.CancelledError:
             pass
     logger.info("Shutting down %s...", settings.PROJECT_NAME)

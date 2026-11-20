@@ -16,6 +16,7 @@ from app.routers import (
     notifications,
     onboarding,
     outreach,
+    pipeline_agent,
     scheduling,
     search,
 )
@@ -36,4 +37,5 @@ api_router.include_router(notifications.router)
 api_router.include_router(onboarding.router)
 api_router.include_router(search.router)
 api_router.include_router(agent_settings.router)
+api_router.include_router(pipeline_agent.router)
 api_router.include_router(ai.router)

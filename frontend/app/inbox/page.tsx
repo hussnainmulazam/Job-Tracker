@@ -175,10 +175,10 @@ function InboxContent() {
     }
   }, [threadData]);
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom on new messages or candidate change (open at latest message)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadData?.messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+  }, [threadData?.messages, selectedCandidateId]);
 
   // 3. Send reply mutation in same Gmail thread
   const sendMutation = useMutation({
@@ -323,9 +323,9 @@ function InboxContent() {
       />
 
       {/* ── Main Dual-Pane Inbox Container ──────────────────────────── */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 rounded-2xl border border-border/70 dark:border-white/[0.08] bg-card shadow-xs overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row rounded-2xl border border-border/70 dark:border-white/[0.08] bg-card shadow-xs overflow-hidden">
         {/* ── Left Pane: Conversation List ──────────────────────────── */}
-        <div className="md:col-span-4 lg:col-span-4 flex flex-col border-r border-border/70 dark:border-white/[0.08] bg-card/60 h-full">
+        <div className="w-full md:w-80 lg:w-96 flex flex-col border-r border-border/70 dark:border-white/[0.08] bg-card/60 shrink-0 h-full">
           {/* Top Search Bar */}
           <div className="p-3 border-b border-border/60 space-y-2.5">
             <div className="relative">
@@ -342,7 +342,7 @@ function InboxContent() {
             <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
               {(
                 [
-                  { id: "all", label: "All" },
+                  { id: "all", label: "All Mail" },
                   { id: "unread", label: "Unread", count: unreadTotal },
                   { id: "awaiting_reply", label: "Awaiting Reply", count: awaitingReplyCount },
                 ] as const
@@ -374,7 +374,7 @@ function InboxContent() {
           </div>
 
           {/* Conversation List Scroll Area */}
-          <div className="flex-1 overflow-y-auto divide-y divide-border/50">
+          <div className="flex-1 overflow-y-auto divide-y divide-border/50 scrollbar-thin scrollbar-thumb-muted-foreground/30 hover:scrollbar-thumb-muted-foreground/50">
             {isLoadingConvs ? (
               <div className="p-3 space-y-3">
                 {[1, 2, 3, 4, 5].map((i) => (
@@ -488,7 +488,7 @@ function InboxContent() {
         </div>
 
         {/* ── Right Pane: Active Thread History & Reply Composer ───── */}
-        <div className="md:col-span-8 lg:col-span-8 flex flex-col h-full bg-background/50">
+        <div className="flex-1 flex flex-col min-w-0 h-full bg-background/50">
           {!selectedCandidateId ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
               <div className="h-12 w-12 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground mb-3">
@@ -581,7 +581,7 @@ function InboxContent() {
               </div>
 
               {/* ── Thread Message History ──────────────────────────── */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-muted-foreground/30 hover:scrollbar-thumb-muted-foreground/50">
                 {threadData.messages.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground text-xs">
                     No messages yet in this candidate thread. Use the reply box below to start the conversation.
@@ -657,29 +657,32 @@ function InboxContent() {
                           )}
                         </div>
 
-                        {/* Outbound Delivery Status indicator */}
-                        {!isInbound && (
-                          <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground">
-                            {msg.status === "sent" ? (
-                              <>
-                                <Check className="h-3 w-3 text-muted-foreground" />
-                                <span>Sent via Gmail</span>
-                              </>
-                            ) : msg.status === "delivered" || msg.status === "read" ? (
-                              <>
-                                <CheckCheck className="h-3 w-3 text-primary" />
-                                <span>Delivered</span>
-                              </>
-                            ) : msg.status === "failed" ? (
-                              <span className="text-rose-500 font-semibold flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3" />
-                                <span>Delivery Failed</span>
-                              </span>
-                            ) : (
-                              <span>Pending dispatch...</span>
-                            )}
-                          </div>
-                        )}
+                        {/* Message Delivery & Sync Status indicator */}
+                        <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground">
+                          {isInbound ? (
+                            <>
+                              <CheckCheck className="h-3 w-3 text-emerald-500" />
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium">Received via Gmail</span>
+                            </>
+                          ) : msg.status === "sent" ? (
+                            <>
+                              <Check className="h-3 w-3 text-muted-foreground" />
+                              <span>Sent via Gmail</span>
+                            </>
+                          ) : msg.status === "delivered" || msg.status === "read" ? (
+                            <>
+                              <CheckCheck className="h-3 w-3 text-primary" />
+                              <span>Delivered</span>
+                            </>
+                          ) : msg.status === "failed" ? (
+                            <span className="text-rose-500 font-semibold flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3" />
+                              <span>Delivery Failed</span>
+                            </span>
+                          ) : (
+                            <span>Pending dispatch...</span>
+                          )}
+                        </div>
                       </div>
                     );
                   })

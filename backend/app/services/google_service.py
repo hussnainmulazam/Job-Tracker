@@ -610,7 +610,11 @@ class GoogleService:
         # Fetch message IDs from Gmail API with exponential backoff
         message_summaries: List[Dict[str, Any]] = []
         if settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and not access_token.startswith("ya29.simulated"):
-            params = {"q": query, "maxResults": 25}
+            # Include recent candidate replies & sent emails as well as resumes
+            effective_query = query
+            if "has:attachment" in effective_query:
+                effective_query = f"({effective_query}) OR newer_than:30d"
+            params = {"q": effective_query, "maxResults": 50}
             if label and label.upper() != "ALL":
                 params["labelIds"] = label
 
@@ -646,10 +650,40 @@ class GoogleService:
 
         messages_found = len(message_summaries)
 
+        # Pre-fetch candidate & message mappings for user to match threads & prevent duplicates
+        openings_map = {op.id: op.title for op in all_openings}
+        all_user_candidates = self.session.exec(
+            select(Candidate).where(Candidate.user_id == user_id)
+        ).all()
+        cand_email_map: Dict[str, Candidate] = {
+            c.email.lower(): c for c in all_user_candidates if c.email
+        }
+
+        user_messages = self.session.exec(
+            select(Message).where(Message.user_id == user_id)
+        ).all()
+        existing_msg_google_ids = set()
+        thread_cand_map: Dict[str, Candidate] = {}
+        for m in user_messages:
+            if m.whatsapp_message_id:
+                existing_msg_google_ids.add(m.whatsapp_message_id)
+            t_id = (m.template_variables or {}).get("thread_id")
+            if t_id and m.candidate_id:
+                cand_match = next((c for c in all_user_candidates if c.id == m.candidate_id), None)
+                if cand_match:
+                    thread_cand_map[t_id] = cand_match
+            gid = (m.template_variables or {}).get("google_message_id")
+            if gid:
+                existing_msg_google_ids.add(gid)
+
         # Process each message
         for msg_summary in message_summaries:
             msg_id = msg_summary.get("id")
-            if not msg_id or msg_id in existing_synced_ids:
+            if not msg_id:
+                continue
+
+            # Skip if this message is already recorded in the candidate conversation
+            if msg_id in existing_msg_google_ids:
                 continue
 
             # Fetch full message details with rate-limit retry
@@ -683,18 +717,45 @@ class GoogleService:
             header_map = {h.get("name", "").lower(): h.get("value", "") for h in headers_list}
 
             sender = header_map.get("from", "Unknown Candidate")
+            to_header = header_map.get("to", "")
             subject = header_map.get("subject", "Resume Submission")
             snippet = msg_data.get("snippet", "")
+            thread_id = msg_data.get("threadId")
+
+            def extract_clean_email(raw: str) -> str:
+                if not raw:
+                    return ""
+                if "<" in raw and ">" in raw:
+                    return raw.split("<")[1].split(">")[0].strip().lower()
+                return raw.strip().lower()
+
+            sender_email = extract_clean_email(sender)
+            account_email = extract_clean_email(account.email)
+            is_outbound = bool(account_email and sender_email == account_email)
+
+            recipients = [
+                extract_clean_email(p)
+                for p in to_header.split(",")
+                if extract_clean_email(p)
+            ]
+
+            # Internal timestamp from Gmail
+            internal_date_ms = msg_data.get("internalDate")
+            if internal_date_ms:
+                try:
+                    msg_datetime = datetime.fromtimestamp(int(internal_date_ms) / 1000.0, tz=timezone.utc)
+                except Exception:
+                    msg_datetime = datetime.now(timezone.utc)
+            else:
+                msg_datetime = datetime.now(timezone.utc)
 
             # Match opening by email subject vs existing opening titles
             matched_opening = None
             subject_lower = subject.lower()
             for op in all_openings:
-                # Direct title substring check or keyword match
                 if op.title and op.title.lower() in subject_lower:
                     matched_opening = op
                     break
-                # Partial match on significant words
                 title_words = [w for w in re.split(r"\W+", op.title.lower()) if len(w) > 3]
                 if title_words and all(w in subject_lower for w in title_words[:2]):
                     matched_opening = op
@@ -702,7 +763,7 @@ class GoogleService:
 
             target_opening = matched_opening or default_opening
 
-            # Extract attachments
+            # Extract attachments & body text
             attachment_names: List[str] = []
             attachment_urls: List[str] = []
             extracted_text = ""
@@ -710,7 +771,6 @@ class GoogleService:
             best_filename: Optional[str] = None
             body_text_parts: List[str] = []
 
-            # Flatten parts recursively to find attachments
             def collect_parts(p: dict) -> list[dict]:
                 parts = []
                 if "parts" in p:
@@ -770,49 +830,290 @@ class GoogleService:
                 elif mime_type == "text/plain" and body.get("data"):
                     try:
                         decoded_text = base64.urlsafe_b64decode(body.get("data", "")).decode("utf-8", errors="ignore")
-                        if len(decoded_text.strip()) > 20:
+                        unquoted_lines = [l for l in decoded_text.splitlines() if not l.strip().startswith(">")]
+                        unquoted = "\n".join(unquoted_lines).strip()
+                        if unquoted:
+                            body_text_parts.append(unquoted)
+                        elif decoded_text.strip():
                             body_text_parts.append(decoded_text.strip())
                     except Exception:
                         pass
-                elif mime_type == "text/html" and body.get("data"):
+                elif mime_type == "text/html" and body.get("data") and not body_text_parts:
                     try:
                         decoded_html = base64.urlsafe_b64decode(body.get("data", "")).decode("utf-8", errors="ignore")
                         clean_text = re.sub(r"<[^>]+>", " ", decoded_html)
                         clean_text = re.sub(r"\s+", " ", clean_text).strip()
-                        if len(clean_text) > 20:
+                        if clean_text:
                             body_text_parts.append(clean_text)
                     except Exception:
                         pass
 
-            # Fallback to body text or snippet if attachment extraction didn't yield text
-            if not extracted_text or len(extracted_text.strip()) < 20:
-                if body_text_parts:
-                    extracted_text = "\n\n".join(body_text_parts)
-                elif snippet and len(snippet.strip()) >= 20:
-                    extracted_text = snippet.strip()
+            message_body = ""
+            if body_text_parts:
+                message_body = body_text_parts[0]
+            elif snippet:
+                message_body = snippet.strip()
+            elif extracted_text:
+                message_body = extracted_text[:300]
 
-            # Record in emails_synced for deduplication
-            email_synced = EmailSynced(
-                user_id=user_id,
-                google_account_id=account.id,
-                message_id=msg_id,
-                thread_id=msg_data.get("threadId"),
-                sender=sender,
-                subject=subject,
-                snippet=snippet,
-                attachment_names=attachment_names,
-                attachment_urls=attachment_urls,
+            # ── CANDIDATE MATCHING ──
+            matched_candidate: Optional[Candidate] = None
+
+            # 1. Match by thread_id if known
+            if thread_id and thread_id in thread_cand_map:
+                matched_candidate = thread_cand_map[thread_id]
+
+            # 2. Match by email
+            if not matched_candidate:
+                if is_outbound:
+                    for recip in recipients:
+                        if recip in cand_email_map:
+                            matched_candidate = cand_email_map[recip]
+                            break
+                else:
+                    if sender_email and sender_email in cand_email_map:
+                        matched_candidate = cand_email_map[sender_email]
+
+            target_opening_title = (
+                openings_map.get(matched_candidate.opening_id, "Candidate Opening")
+                if matched_candidate
+                else (target_opening.title if target_opening else "General Applications")
             )
-            self.session.add(email_synced)
+
+            # ── IF MATCHED TO AN EXISTING CANDIDATE: SYNC TO CONVERSATION THREAD ──
+            if matched_candidate:
+                if thread_id:
+                    thread_cand_map[thread_id] = matched_candidate
+
+                msg_row = Message(
+                    candidate_id=matched_candidate.id,
+                    user_id=user_id,
+                    direction=MessageDirection.outbound if is_outbound else MessageDirection.inbound,
+                    channel="email",
+                    message_type=MessageType.email,
+                    body=message_body or (snippet or "Email message."),
+                    status=MessageStatus.sent if is_outbound else MessageStatus.delivered,
+                    sent_at=msg_datetime,
+                    delivered_at=msg_datetime if not is_outbound else None,
+                    created_at=msg_datetime,
+                    template_name="recruiter_email" if is_outbound else "candidate_email_reply",
+                    template_variables={
+                        "subject": subject,
+                        "thread_id": thread_id,
+                        "google_message_id": msg_id,
+                        "attachments": [
+                            {"filename": fn, "url": u}
+                            for fn, u in zip(attachment_names, attachment_urls)
+                        ],
+                    },
+                    whatsapp_message_id=msg_id,
+                )
+                self.session.add(msg_row)
+                existing_msg_google_ids.add(msg_id)
+
+                if not is_outbound:
+                    matched_candidate.last_inbound_whatsapp_at = msg_datetime
+                    matched_candidate.updated_at = datetime.now(timezone.utc)
+                    self.session.add(matched_candidate)
+
+                    try:
+                        from app.services.agent_settings_service import agent_settings_service
+                        agent_settings_service.notify_hr_instant(
+                            session=self.session,
+                            user_id=user_id,
+                            event_type="reply",
+                            candidate_name=matched_candidate.name,
+                            opening_title=target_opening_title,
+                            details=f"Subject: {subject}\n\n{message_body[:400]}",
+                        )
+                    except Exception as alert_err:
+                        logger.warning("Could not send instant reply alert to HR: %s", alert_err)
+
+                # Record in emails_synced
+                if msg_id not in existing_synced_ids:
+                    email_synced = EmailSynced(
+                        user_id=user_id,
+                        google_account_id=account.id,
+                        message_id=msg_id,
+                        thread_id=thread_id,
+                        sender=sender,
+                        subject=subject,
+                        snippet=snippet,
+                        attachment_names=attachment_names,
+                        attachment_urls=attachment_urls,
+                    )
+                    self.session.add(email_synced)
+                    existing_synced_ids.add(msg_id)
+
+                messages_processed += 1
+                results.append(
+                    EmailSyncItemResult(
+                        message_id=msg_id,
+                        sender=sender,
+                        subject=subject,
+                        status="created",
+                        candidate_id=str(matched_candidate.id),
+                        candidate_name=matched_candidate.name,
+                        opening_title=target_opening_title,
+                        reason=f"{'Sent email' if is_outbound else 'Candidate reply'} synced into conversation thread.",
+                    )
+                )
+                continue
+
+            # ── IF OUTBOUND AND NOT MATCHED: SKIP (Recruiter personal / non-candidate email) ──
+            if is_outbound:
+                continue
+
+            # ── IF INBOUND AND NOT MATCHED: ATTEMPT NEW CANDIDATE INGESTION ──
+            if not attachment_names and len(extracted_text.strip()) < 50:
+                continue
+
+            if msg_id not in existing_synced_ids:
+                email_synced = EmailSynced(
+                    user_id=user_id,
+                    google_account_id=account.id,
+                    message_id=msg_id,
+                    thread_id=thread_id,
+                    sender=sender,
+                    subject=subject,
+                    snippet=snippet,
+                    attachment_names=attachment_names,
+                    attachment_urls=attachment_urls,
+                )
+                self.session.add(email_synced)
+                existing_synced_ids.add(msg_id)
             messages_processed += 1
-            existing_synced_ids.add(msg_id)
 
-            target_opening_title = target_opening.title if target_opening else "General Applications"
+            # Ingest candidate using deterministic extraction pipeline
+            try:
+                det = extract_all_deterministic_fields(extracted_text)
+                cand_data = det.get("extracted_data")
 
-            # Ingest candidate using the deterministic extraction pipeline
-            if not extracted_text or len(extracted_text.strip()) < 20:
-                fail_reason = f"No parseable resume attachment (PDF/DOCX) or body text found in email '{subject}'."
-                errors.append(f"Message {msg_id}: {fail_reason}")
+                parsed_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
+                final_name = cand_data.name if (cand_data and cand_data.name) else parsed_name or "Applicant"
+
+                parsed_email = sender_email or f"applicant_{uuid.uuid4().hex[:6]}@gmail.com"
+                final_email = cand_data.email if (cand_data and cand_data.email) else parsed_email
+
+                existing_cand = cand_email_map.get(final_email.lower())
+                if existing_cand:
+                    continue
+
+                new_candidate = Candidate(
+                    user_id=user_id,
+                    opening_id=target_opening.id,
+                    name=final_name,
+                    email=final_email.lower(),
+                    phone=cand_data.phone if cand_data else None,
+                    address=cand_data.address if cand_data else None,
+                    github_url=cand_data.github_url if cand_data else None,
+                    linkedin_url=cand_data.linkedin_url if cand_data else None,
+                    portfolio_url=cand_data.portfolio_url if cand_data else None,
+                    kaggle_url=cand_data.kaggle_url if cand_data else None,
+                    cv_text=extracted_text,
+                    cv_file_url=attachment_urls[0] if attachment_urls else None,
+                    stage=CandidateStage.applied,
+                    extracted_data={
+                        "source": "gmail_sync",
+                        "gmail_message_id": msg_id,
+                        "gmail_subject": subject,
+                        "gmail_sender": sender,
+                        "current_title": cand_data.current_title if cand_data else None,
+                        "years_of_experience": cand_data.years_of_experience if cand_data else None,
+                        "top_skills": cand_data.top_skills if cand_data else [],
+                        "education": cand_data.education if cand_data else None,
+                    } if cand_data else {
+                        "source": "gmail_sync",
+                        "gmail_message_id": msg_id,
+                        "gmail_subject": subject,
+                        "gmail_sender": sender,
+                    },
+                )
+                self.session.add(new_candidate)
+                self.session.flush()
+
+                cand_email_map[new_candidate.email.lower()] = new_candidate
+                if thread_id:
+                    thread_cand_map[thread_id] = new_candidate
+
+                initial_msg = Message(
+                    candidate_id=new_candidate.id,
+                    user_id=user_id,
+                    direction=MessageDirection.inbound,
+                    channel="email",
+                    message_type=MessageType.email,
+                    body=(body_text_parts[0] if body_text_parts else snippet) or f"Hello, please find attached my resume for the {target_opening_title} position.\n\nLooking forward to speaking with you.\n\nBest regards,\n{new_candidate.name}",
+                    status=MessageStatus.delivered,
+                    sent_at=msg_datetime,
+                    delivered_at=msg_datetime,
+                    created_at=msg_datetime,
+                    template_name="application_submission",
+                    template_variables={
+                        "subject": subject,
+                        "thread_id": thread_id,
+                        "google_message_id": msg_id,
+                        "attachments": [
+                            {"filename": fn, "url": u}
+                            for fn, u in zip(attachment_names, attachment_urls)
+                        ],
+                    },
+                    whatsapp_message_id=msg_id,
+                )
+                self.session.add(initial_msg)
+                existing_msg_google_ids.add(msg_id)
+
+                if cand_data:
+                    for l_type, l_url in [
+                        ("github", cand_data.github_url),
+                        ("linkedin", cand_data.linkedin_url),
+                        ("portfolio", cand_data.portfolio_url),
+                        ("kaggle", cand_data.kaggle_url),
+                    ]:
+                        if l_url:
+                            link_row = CandidateLink(
+                                candidate_id=new_candidate.id,
+                                user_id=user_id,
+                                link_type=l_type,
+                                url=l_url,
+                                is_verified=True,
+                            )
+                            self.session.add(link_row)
+
+                candidates_created += 1
+
+                audit_log_service.record(
+                    session=self.session,
+                    user_id=user_id,
+                    action="candidate_created",
+                    candidate_id=new_candidate.id,
+                    opening_id=target_opening.id,
+                    to_stage="applied",
+                    details=f"Candidate {new_candidate.name} ingested from Gmail message '{subject}'.",
+                )
+
+                try:
+                    from app.services.candidate_service import candidate_service
+                    candidate_service.auto_handle_candidate_received(self.session, user_id, new_candidate)
+                except Exception as auto_flow_err:
+                    logger.warning("Auto scoring / auto email failed for %s: %s", new_candidate.id, auto_flow_err)
+
+                results.append(
+                    EmailSyncItemResult(
+                        message_id=msg_id,
+                        sender=sender,
+                        subject=subject,
+                        status="created",
+                        candidate_id=str(new_candidate.id),
+                        candidate_name=new_candidate.name,
+                        opening_title=target_opening_title,
+                        reason=f"Candidate profile created in pipeline under stage 'Applied' for opening '{target_opening_title}'.",
+                    )
+                )
+            except Exception as ingest_err:
+                self.session.rollback()
+                err_text = f"Candidate ingestion error: {ingest_err}"
+                logger.exception(err_text)
+                errors.append(f"Message {msg_id}: {err_text}")
                 results.append(
                     EmailSyncItemResult(
                         message_id=msg_id,
@@ -820,228 +1121,9 @@ class GoogleService:
                         subject=subject,
                         status="failed",
                         opening_title=target_opening_title,
-                        reason=fail_reason,
+                        reason=err_text,
                     )
                 )
-            else:
-                try:
-                    # 1. Run deterministic field extraction
-                    det = extract_all_deterministic_fields(extracted_text)
-                    cand_data = det.get("extracted_data")
-
-                    # Name fallback: header 'From'
-                    parsed_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
-                    final_name = cand_data.name if (cand_data and cand_data.name) else parsed_name or "Applicant"
-
-                    # Email fallback: header 'From'
-                    parsed_email = sender.split("<")[1].split(">")[0].strip() if "<" in sender else f"applicant_{uuid.uuid4().hex[:6]}@gmail.com"
-                    final_email = cand_data.email if (cand_data and cand_data.email) else parsed_email
-
-                    # Check if candidate exists for this opening
-                    existing_candidate = self.session.exec(
-                        select(Candidate).where(
-                            Candidate.user_id == user_id,
-                            Candidate.opening_id == target_opening.id,
-                            Candidate.email == final_email.lower(),
-                        )
-                    ).first()
-
-                    if existing_candidate:
-                        # Update candidate with latest resume if provided
-                        if extracted_text and len(extracted_text.strip()) > 30:
-                            existing_candidate.cv_text = extracted_text
-                        if attachment_urls:
-                            existing_candidate.cv_file_url = attachment_urls[0]
-                        if not existing_candidate.extracted_data:
-                            existing_candidate.extracted_data = {}
-                        cand_meta = dict(existing_candidate.extracted_data)
-                        cand_meta["source"] = "gmail_sync"
-                        cand_meta["gmail_message_id"] = msg_id
-                        cand_meta["gmail_subject"] = subject
-                        cand_meta["gmail_sender"] = sender
-                        if cand_data:
-                            if cand_data.current_title:
-                                cand_meta["current_title"] = cand_data.current_title
-                            if cand_data.years_of_experience is not None:
-                                cand_meta["years_of_experience"] = cand_data.years_of_experience
-                            if cand_data.top_skills:
-                                cand_meta["top_skills"] = cand_data.top_skills
-                            if cand_data.education:
-                                cand_meta["education"] = cand_data.education
-                        existing_candidate.extracted_data = cand_meta
-                        existing_candidate.updated_at = datetime.now(timezone.utc)
-                        self.session.add(existing_candidate)
-
-                        # Create inbound message in candidate thread
-                        inbound_reply = Message(
-                            candidate_id=existing_candidate.id,
-                            user_id=user_id,
-                            direction=MessageDirection.inbound,
-                            message_type=MessageType.email,
-                            body=(body_text_parts[0] if body_text_parts else snippet) or "Candidate email communication received.",
-                            status=MessageStatus.delivered,
-                            sent_at=datetime.now(timezone.utc),
-                            template_name="candidate_email_reply",
-                            template_variables={
-                                "subject": subject,
-                                "thread_id": msg_data.get("threadId"),
-                                "google_message_id": msg_id,
-                                "attachments": [
-                                    {"filename": fn, "url": u}
-                                    for fn, u in zip(attachment_names, attachment_urls)
-                                ],
-                            },
-                        )
-                        self.session.add(inbound_reply)
-
-                        try:
-                            from app.services.agent_settings_service import agent_settings_service
-                            reply_snippet = ((body_text_parts[0] if body_text_parts else snippet) or "").strip()
-                            agent_settings_service.notify_hr_instant(
-                                session=self.session,
-                                user_id=user_id,
-                                event_type="reply",
-                                candidate_name=existing_candidate.name,
-                                opening_title=target_opening_title,
-                                details=f"Subject: {subject}\n\n{reply_snippet[:400]}",
-                            )
-                        except Exception as alert_err:
-                            logger.warning("Could not send instant reply alert to HR: %s", alert_err)
-
-                        stage_name = existing_candidate.stage.value if hasattr(existing_candidate.stage, "value") else str(existing_candidate.stage)
-                        results.append(
-                            EmailSyncItemResult(
-                                message_id=msg_id,
-                                sender=sender,
-                                subject=subject,
-                                status="duplicate",
-                                candidate_id=str(existing_candidate.id),
-                                candidate_name=existing_candidate.name,
-                                opening_title=target_opening_title,
-                                reason=f"Inbound reply/update synced for '{existing_candidate.name}' ({stage_name}).",
-                            )
-                        )
-                    else:
-                        new_candidate = Candidate(
-                            user_id=user_id,
-                            opening_id=target_opening.id,
-                            name=final_name,
-                            email=final_email.lower(),
-                            phone=cand_data.phone if cand_data else None,
-                            address=cand_data.address if cand_data else None,
-                            github_url=cand_data.github_url if cand_data else None,
-                            linkedin_url=cand_data.linkedin_url if cand_data else None,
-                            portfolio_url=cand_data.portfolio_url if cand_data else None,
-                            kaggle_url=cand_data.kaggle_url if cand_data else None,
-                            cv_text=extracted_text,
-                            cv_file_url=attachment_urls[0] if attachment_urls else None,
-                            stage=CandidateStage.applied,
-                            extracted_data={
-                                "source": "gmail_sync",
-                                "gmail_message_id": msg_id,
-                                "gmail_subject": subject,
-                                "gmail_sender": sender,
-                                "current_title": cand_data.current_title if cand_data else None,
-                                "years_of_experience": cand_data.years_of_experience if cand_data else None,
-                                "top_skills": cand_data.top_skills if cand_data else [],
-                                "education": cand_data.education if cand_data else None,
-                            } if cand_data else {
-                                "source": "gmail_sync",
-                                "gmail_message_id": msg_id,
-                                "gmail_subject": subject,
-                                "gmail_sender": sender,
-                            },
-                        )
-                        self.session.add(new_candidate)
-                        self.session.flush()
-
-                        # Create initial inbound message in candidate thread
-                        initial_msg = Message(
-                            candidate_id=new_candidate.id,
-                            user_id=user_id,
-                            direction=MessageDirection.inbound,
-                            message_type=MessageType.email,
-                            body=(body_text_parts[0] if body_text_parts else snippet) or f"Hello, please find attached my resume for the {target_opening_title} position.\n\nLooking forward to speaking with you.\n\nBest regards,\n{new_candidate.name}",
-                            status=MessageStatus.delivered,
-                            sent_at=datetime.now(timezone.utc),
-                            template_name="application_submission",
-                            template_variables={
-                                "subject": subject,
-                                "thread_id": msg_data.get("threadId"),
-                                "google_message_id": msg_id,
-                                "attachments": [
-                                    {"filename": fn, "url": u}
-                                    for fn, u in zip(attachment_names, attachment_urls)
-                                ],
-                            },
-                        )
-                        self.session.add(initial_msg)
-
-                        # Save social links if present
-                        if cand_data:
-                            for l_type, l_url in [
-                                ("github", cand_data.github_url),
-                                ("linkedin", cand_data.linkedin_url),
-                                ("portfolio", cand_data.portfolio_url),
-                                ("kaggle", cand_data.kaggle_url),
-                            ]:
-                                if l_url:
-                                    link_row = CandidateLink(
-                                        candidate_id=new_candidate.id,
-                                        user_id=user_id,
-                                        link_type=l_type,
-                                        url=l_url,
-                                        is_verified=True,
-                                    )
-                                    self.session.add(link_row)
-
-                        candidates_created += 1
-
-                        # Audit trail entry per candidate created
-                        audit_log_service.record(
-                            session=self.session,
-                            user_id=user_id,
-                            action="candidate_created",
-                            candidate_id=new_candidate.id,
-                            opening_id=target_opening.id,
-                            to_stage="applied",
-                            details=f"Candidate {new_candidate.name} ingested from Gmail message '{subject}'.",
-                        )
-
-                        # Auto-check scoring & dispatch auto-acknowledgement email
-                        try:
-                            from app.services.candidate_service import candidate_service
-                            candidate_service.auto_handle_candidate_received(self.session, user_id, new_candidate)
-                        except Exception as auto_flow_err:
-                            logger.warning("Auto scoring / auto email failed for %s: %s", new_candidate.id, auto_flow_err)
-
-                        results.append(
-                            EmailSyncItemResult(
-                                message_id=msg_id,
-                                sender=sender,
-                                subject=subject,
-                                status="created",
-                                candidate_id=str(new_candidate.id),
-                                candidate_name=new_candidate.name,
-                                opening_title=target_opening_title,
-                                reason=f"Candidate profile created in pipeline under stage 'Applied' for opening '{target_opening_title}'.",
-                            )
-                        )
-                except Exception as ingest_err:
-                    self.session.rollback()
-                    err_text = f"Candidate ingestion error: {ingest_err}"
-                    logger.exception(err_text)
-                    errors.append(f"Message {msg_id}: {err_text}")
-                    results.append(
-                        EmailSyncItemResult(
-                            message_id=msg_id,
-                            sender=sender,
-                            subject=subject,
-                            status="failed",
-                            opening_title=target_opening_title,
-                            reason=err_text,
-                        )
-                    )
 
         now = datetime.now(timezone.utc)
         account.last_synced_at = now
