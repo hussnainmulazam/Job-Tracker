@@ -26,10 +26,6 @@ from app.models.candidate import Candidate
 from app.models.candidate_link import CandidateLink
 from app.models.job_opening import JobOpening
 from app.models.message import Message
-from app.models.scorecard import Scorecard
-from app.models.application import Application
-from app.models.cv_version import CVVersion
-from app.models.job import Job
 from app.models.user import User
 
 # Dedicated test database URL. Default to isolated in-memory SQLite with StaticPool.
@@ -86,21 +82,17 @@ def session_fixture(engine) -> Generator[Session, None, None]:
     # Explicit row clean-up after each test to guarantee no lingering test data
     from app.models import (
         AgentSettings,
-        Application,
         AuditLog,
         AvailabilitySchedule,
         Candidate,
         CandidateLink,
-        CVVersion,
         EmailSynced,
         GoogleAccount,
         Interview,
-        Job,
         JobOpening,
         Message,
         Notification,
         SchedulingLink,
-        Scorecard,
         User,
     )
 
@@ -116,12 +108,8 @@ def session_fixture(engine) -> Generator[Session, None, None]:
             CandidateLink,
             EmailSynced,
             GoogleAccount,
-            Scorecard,
             Candidate,
             JobOpening,
-            CVVersion,
-            Application,
-            Job,
             User,
         ]:
             try:
