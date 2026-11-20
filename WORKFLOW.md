@@ -1,40 +1,138 @@
-# WORKFLOW.md — HR Recruiting App: Phase 0 Analysis
+# WORKFLOW.md — HR Recruiting Orchestration & Candidate Lifecycle
 
 > **Generated:** 2026-11-20 | **Status:** Phase 0 Complete — Awaiting "go" for Phase 1  
-> Lead engineer read of full repo. No code changes made in this phase.
+> Lead engineer analysis of full repository. No code changes made in this phase.
 
 ---
 
-## 1. Current Candidate Lifecycle
+## 1. Candidate Journey (Step-by-Step Overview)
 
-### 1.1 Stage Enum (Current)
+The recruiting orchestration follows a 9-step candidate lifecycle from initial intake to final offer issuance:
 
 ```
-CandidateStage (backend/app/models/candidate.py)
-  applied       → CV just received / created
-  screening     → AI is scoring / has scored the CV
-  shortlisted   → HR approved in CV review (also used by outreach draft)
-  contacted     → Outreach message sent and candidate replied
-  scheduled     → Interview booked (slot selected via scheduling link)
-  interview     → Interview round passed; next round invite sent
-  interviewed   → Interview time has passed (auto-sync by outreach_service)
-  offer         → Final interview passed; offer draft exists OR offer sent
-  rejected      → Failed at any stage; rejection email dispatched
+[1. CV Arrives] ──> [2. Extract Details] ──> [3. AI Score & Screen]
+                                                       │
+                                                       ▼
+[5b. Reject Email] <── [Reject] ── [4. HR Review Decision] ── [Approve] ──> [5a. CV Passed & Link]
+                                                                                   │
+                                                                                   ▼
+[7. Interview Executed] <── [6. Meet Created] <── [Candidate Books Slot]
+         │
+         ├──> [Mark Failed] ──> Rejection Email ──> Stage: Rejected
+         ├──> [Mark No-Show] ──> Status: No-show ──> Awaiting Reschedule
+         └──> [Mark Passed] ──> [8. Next Round Invite OR Offer Letter Draft]
+                                                       │
+                                                       ▼
+                                         [9. HR Approves Offer Letter]
+                                                       │
+                                                       ▼
+                                              Offer Email Dispatched
 ```
 
-### 1.2 Supporting Status Fields
+### 1.1 Complete Step-by-Step Transition Matrix
 
-| Field | Location | Values |
-|-------|----------|--------|
-| `review_status` | `candidates` table | `pending` / `approved` / `rejected` |
-| `offer_letter_status` | `candidates` table | `draft` / `sent` |
-| `auto_reply_sent` | `candidates` table | `bool` |
-| `InterviewStatus` | `interviews` table | `scheduled` / `rescheduled` / `cancelled` / `completed` / `passed` / `failed` / `no_show` |
-| `SchedulingLinkStatus` | `scheduling_links` table | `active` / `booked` / `expired` / `cancelled` |
+| Step | Lifecycle Stage | Who Triggers? | What Happens? | Tables Used | API Endpoints | Where Code Breaks Flow |
+|---|---|---|---|---|---|---|
+| **1. CV Ingest** | `applied` | **Agent** (background sync) OR **HR** (manual upload) | CV arrives via Gmail attachment or file upload. Text extracted and initial candidate created. Acknowledgement "CV Received" email queued. | `candidates`, `emails_synced`, `messages` | `GET /integrations/google/sync`<br>`POST /api/v1/candidates/upload`<br>`POST /api/v1/candidates/confirm-extracted` | Sync query only scans for PDF/DOCX attachments; emails with text CVs are missed. Ingestion calls `asyncio.run()` in sync thread. |
+| **2. Extract** | `applied` | **Agent** | Structured data parsed (name, email, phone, skills, experience, LinkedIn/GitHub URLs) using regex first, LLM for gaps. Never hallucinates values. | `candidates`, `candidate_links` | `POST /api/v1/candidates/{id}/extract-details`<br>`POST /api/v1/candidates/extract-cv` | None (Extractor functions reliably). |
+| **3. AI Score** | `screening` | **Agent** | Evaluates candidate CV against opening JD. Generates match score (0-100), matched skills, missing skills, red flags, and short reason. Flags `review_status='pending'`. | `candidates` | `POST /api/v1/candidates/{id}/score`<br>`POST /api/v1/cv-review/score/{id}` | Three duplicate scoring paths exist (`candidate_service`, `cv_review_service`, `matching_service`). Pinecone cache lookup adds latency and fails silently. |
+| **4. HR Review** | `awaiting_hr_review` | **HR** (Explicit human decision) | Candidate sits in "Needs HR Review" queue. Recruiter inspects AI reasoning and clicks **Approve** or **Reject** (bulk allowed). Nothing sends until HR decides. | `candidates`, `audit_logs` | `GET /api/v1/cv-review/queue`<br>`POST /api/v1/cv-review/decision` | **CRITICAL BREAKAGE**: `cv_review_service` attempts to create `Message(channel="email", ...)`. `Message` model lacks `channel` attribute, triggering `ValidationError` 500. |
+| **5a. Approved Action** | `shortlisted` | **Agent** (triggered by HR approval) | Marks candidate `approved`. Dispatches "CV Passed" and "Job Details" emails from saved templates, and creates 7-day self-scheduling booking link. | `candidates`, `scheduling_links`, `messages`, `audit_logs` | Internal call triggered by `POST /api/v1/cv-review/decision` | Duplicate email sender in `candidate_service.auto_send_approval_email()` can double-send raw unformatted emails. |
+| **5b. Rejected Action** | `rejected` | **Agent** (triggered by HR rejection) | Marks candidate `rejected`. Dispatches polite "Rejection" email from saved templates. Audit trail logged. | `candidates`, `messages`, `audit_logs` | Internal call triggered by `POST /api/v1/cv-review/decision` | Same `Message.channel` 500 error blocks rejection email dispatch. |
+| **6. Slot Booking** | `scheduled` | **Candidate** (Public self-booking) | Candidate visits `/schedule/{token}`, checks recruiter availability against Google Calendar freeBusy, and selects a slot. System locks slot, generates Google Meet link, and updates DB. | `interviews`, `scheduling_links`, `candidates`, `audit_logs` | `GET /api/v1/scheduling/public/{token}/slots`<br>`POST /api/v1/scheduling/public/{token}/book` | `get_or_create_recruiter_booking_link()` injects fake candidate `"Applicant Preview"` into DB when table is empty. |
+| **7. Interview Run** | `scheduled` | **HR & Candidate** | Google Meet interview takes place at scheduled time. System sends 24-hour and 1-hour email reminders before interview. | `interviews`, `notifications` | `POST /api/v1/scheduling/reminders/process` | Reminders use hardcoded raw text bypassing recruiter templates in `OnboardingSetup`. Background reminder cron is not running autonomously. |
+| **8. Interview Result** | `interview` OR `offer` | **HR** (Explicit human decision) | Recruiter records outcome: **Passed**, **Failed**, or **No-show**. Passed advances to next round invite (Behavioral 45m / Final 60m). Final Passed creates Offer Letter draft. Failed sends Rejection. | `interviews`, `scheduling_links`, `candidates`, `messages`, `audit_logs` | `POST /api/v1/scheduling/interviews/{id}/result` | **CRITICAL BREAKAGE**: Fails with 500 because `scheduling_service` calls `Message(channel="email", ...)`. |
+| **9. Offer Approval** | `offer` | **HR** (Explicit human decision) | Offer Letter draft generated with candidate name, role, salary, and company. Recruiter previews, edits, and clicks **Approve & Send**. Offer is never dispatched autonomously. | `candidates`, `messages`, `audit_logs` | `GET /api/v1/scheduling/offer-draft/{id}`<br>`POST /api/v1/scheduling/offer-draft/{id}/send` | None once `Message.channel` bug is resolved. Offer draft preview and template variable interpolation work cleanly. |
 
 ---
 
-## 2. Full Stage-Transition Map
+## 2. Seven Explicit Breakage Points in Current Codebase
+
+During the end-to-end audit, 7 technical defects were discovered that halt or corrupt the workflow:
+
+### 1. `Message` Model Missing `channel` Attribute (Halts Review & Interview Result Flows)
+- **Files:** `backend/app/services/cv_review_service.py` (lines 303, 318, 430), `backend/app/services/scheduling_service.py` (lines 1804, 1894, 2039, 2257).
+- **Defect:** Services instantiate `Message(channel="email", ...)`. The `Message` SQLModel schema in `backend/app/models/message.py` does not define `channel`.
+- **Runtime Error:** Pydantic/SQLModel raises `ValidationError: Extra inputs are not permitted` / 500 Internal Server Error when HR approves a CV, rejects a CV, or submits an interview outcome.
+- **Fix:** Add `channel: Optional[str] = Field(default="email")` to `Message` model and migrate Postgres column.
+
+### 2. Synchronous `asyncio.run()` Inside Web Thread (Deadlock & Latency Risk)
+- **File:** `backend/app/services/candidate_service.py` (`auto_handle_candidate_received()`).
+- **Defect:** In-request handler calls `asyncio.run()` with `ThreadPoolExecutor` to execute asynchronous AI scoring.
+- **Impact:** Blocks FastAPI event loop threads, introduces request timeout risk, and causes unpredictable concurrency locks.
+- **Fix:** Move CV scoring to FastAPI `BackgroundTasks` or LangGraph background worker.
+
+### 3. Hardcoded Email Text Bypassing Recruiter Templates
+- **File:** `backend/app/services/scheduling_service.py` (`_send_interview_notification()`).
+- **Defect:** Email body is constructed using hardcoded python string formatters instead of querying `OnboardingSetup.templates` or `template_service`.
+- **Impact:** Any custom wording, tone, or branding configured by the recruiter in the Setup Wizard or Settings page is completely ignored for booking confirmations and interview reminders.
+- **Fix:** Connect all email dispatch paths to `fill_template_variables()`.
+
+### 4. Fake Candidate Injection in Booking Link Preview
+- **File:** `backend/app/services/scheduling_service.py` (`get_or_create_recruiter_booking_link()`).
+- **Defect:** If no candidates exist in the database, the service automatically creates and inserts a dummy candidate named `"Applicant Preview"` (`applicant@example.com`).
+- **Impact:** Pollutes the live database with fake test data that appears in the recruiter's Kanban pipeline and candidate search.
+- **Fix:** Remove fake candidate auto-creation; return an explicit 404 or empty state if no valid candidate exists.
+
+### 5. Unauthenticated, Destructive Debug Endpoint in Production
+- **File:** `backend/app/routers/debug.py` mounted at `/debug/integrations` in `main.py`.
+- **Defect:** The endpoint has no auth dependency. Every time it is called, it makes live outbound Gmail API calls, creates and deletes calendar events, writes test availability records to Postgres, and takes 16+ seconds to execute.
+- **Impact:** High security vulnerability and potential rate-limit exhaustion.
+- **Fix:** Delete `debug.py` completely from application routers.
+
+### 6. Triple Duplicate Scoring Pipelines
+- **Locations:** `candidate_service.score_candidate()`, `cv_review_service.score_and_queue_candidate()`, and `matching_service.run_matching_job()`.
+- **Defect:** Three different services maintain independent scoring and caching logic. `matching_service` stores progress in an in-memory dictionary lost on server restart.
+- **Fix:** Consolidate into a single canonical screening service with deterministic DB caching.
+
+### 7. Redundant Pinecone Overhead vs Plain SQL Postgres Caching
+- **Location:** `backend/app/services/ai.py` (lines 170–208).
+- **Defect:** Calls Pinecone REST API for semantic cache checks on every CV.
+- **Impact:** Adds 800ms–1400ms latency per check. Postgres already stores `cv_hash` and evaluation results in `candidates.extracted_data`. An exact hash match in SQL takes <1ms and requires zero external credentials.
+- **Fix:** Standardize screening cache on Postgres hash lookup; retire Pinecone.
+
+---
+
+## 3. Database Tables Used in Lifecycle
+
+| Table | Stage / Step | Read / Write | Columns Used |
+|---|---|---|---|
+| `users` | All (Authentication) | Read | `id`, `email`, `full_name`, `company` |
+| `job_openings` | Step 3, 5, 6, 8 | Read | `id`, `title`, `description`, `required_skills`, `pass_mark`, `round_config` |
+| `candidates` | All | Read & Write | `id`, `opening_id`, `name`, `email`, `stage`, `match_score`, `review_status`, `offer_letter_status`, `extracted_data`, `cv_hash` |
+| `candidate_links` | Step 2 (Extraction) | Read & Write | `id`, `candidate_id`, `url`, `link_type`, `is_verified` |
+| `scheduling_links` | Step 5a, 6, 8 | Read & Write | `id`, `candidate_id`, `token`, `round_type`, `status`, `expires_at` |
+| `availability_schedules`| Step 6 (Booking) | Read | `id`, `user_id`, `schedule_data`, `slot_duration_minutes` |
+| `interviews` | Step 6, 7, 8 | Read & Write | `id`, `candidate_id`, `round_type`, `scheduled_at`, `meet_link`, `result_status`, `feedback_notes` |
+| `messages` | Step 1, 5a, 5b, 6, 8, 9 | Read & Write | `id`, `candidate_id`, `subject`, `body`, `direction`, `status`, `sent_at`, `channel` |
+| `emails_synced` | Step 1 (Gmail Sync) | Read & Write | `id`, `message_id`, `thread_id`, `user_id` |
+| `google_accounts` | Step 1, 5, 6, 8, 9 | Read | `id`, `user_id`, `access_token`, `refresh_token`, `email`, `is_active` |
+| `onboarding_setups` | Step 1, 5, 8, 9 | Read | `id`, `user_id`, `templates`, `company_name`, `hr_name` |
+| `agent_settings` | All | Read | `id`, `user_id`, `is_paused`, `daily_email_limit`, `emails_sent_today` |
+| `audit_logs` | All Transitions | Write | `id`, `candidate_id`, `action`, `stage_from`, `stage_to`, `performed_by`, `reason` |
+
+---
+
+## 4. Dead Code & Duplicate Code to Delete in Phase 1
+
+1. **Dead Models:**
+   - `backend/app/models/application.py` (0 DB rows, unused).
+   - `backend/app/models/job.py` (0 DB rows, superseded by `job_openings`).
+   - `backend/app/models/cv_version.py` (0 DB rows, unreferenced).
+   - `backend/app/models/scorecard.py` (0 DB rows, superseded by `interviews`).
+2. **Dead Routers:**
+   - `backend/app/routers/scorecards.py` (Orphaned CRUD).
+   - `backend/app/routers/debug.py` (Unauthenticated security risk).
+3. **Dead / Duplicate Services:**
+   - `backend/app/services/matching_service.py` (In-memory duplicate of scoring pipeline).
+   - `backend/app/services/scorecard_service.py` (Unreferenced).
+4. **Duplicate Routes & Redirects to Delete in Frontend:**
+   - `frontend/app/ai-tools/page.tsx` (Legacy redirect).
+   - `frontend/app/applications/page.tsx` (Legacy redirect).
+   - `frontend/app/cv/page.tsx` (Legacy redirect).
+   - `frontend/components/dashboard/recent-activity.tsx` (Duplicate of `recent-activity-feed.tsx`).
+   - `frontend/components/dashboard/applications-timeline-chart.tsx` (Duplicate of `applications-chart.tsx`).
+
 
 ### 2.1 Stage: `applied` (CV Ingested)
 

@@ -114,7 +114,7 @@ async function testPages() {
 
       // Check for stuck skeletons (e.g. animate-pulse elements without actual data)
       const skeletons = await page.locator('.animate-pulse, [data-skeleton], [data-loading="true"]').count();
-      const mainText = (await page.locator('main, body').innerText()).trim();
+      const mainText = (await page.locator('body').innerText()).trim();
       bodySnippet = mainText.slice(0, 200).replace(/\s+/g, ' ');
 
       if (skeletons > 3 && (mainText.length < 50 || bodySnippet.toLowerCase().includes("loading"))) {
@@ -182,11 +182,11 @@ async function testApiEndpoints() {
     { method: "GET", path: "/api/v1/outreach/audit-trail", auth: true, desc: "Outreach transmission audit trail" },
     { method: "GET", path: "/api/v1/integrations/google/status", auth: true, desc: "Google OAuth & Gmail integration status" },
     { method: "GET", path: "/api/v1/integrations/google/conversations", auth: true, desc: "Gmail recruiting thread conversations" },
-    { method: "GET", path: "/api/v1/templates", auth: true, desc: "Recruiting email templates" },
-    { method: "GET", path: "/api/v1/agent-settings", auth: true, desc: "Agent pause, quota, and notify settings" },
-    { method: "GET", path: "/api/v1/agent-settings/today-activity", auth: true, desc: "Today's agent activity feed" },
-    { method: "GET", path: "/api/v1/setup", auth: true, desc: "4-step onboarding wizard state" },
-    { method: "GET", path: "/api/v1/debug/integrations", auth: false, desc: "Unauthenticated debug endpoint" }
+    { method: "GET", path: "/api/v1/agent/settings", auth: true, desc: "Agent pause, quota, and notify settings" },
+    { method: "GET", path: "/api/v1/agent/today-activity", auth: true, desc: "Today's agent activity feed" },
+    { method: "GET", path: "/api/v1/onboarding/setup", auth: true, desc: "4-step onboarding wizard state" },
+    { method: "GET", path: "/api/v1/onboarding/templates", auth: true, desc: "Recruiting email templates" },
+    { method: "GET", path: "/debug/integrations", auth: false, desc: "Unauthenticated debug endpoint" }
   ];
 
   const results = [];
