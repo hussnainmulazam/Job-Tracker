@@ -51,10 +51,10 @@ interface UserProfile {
 
 const NAV_ITEMS = [
   {
-    label: "Dashboard",
+    label: "Action Center",
     href: "/dashboard",
     icon: LayoutDashboard,
-    badge: null,
+    badge: "Action",
   },
   {
     label: "Pipeline",
@@ -69,21 +69,9 @@ const NAV_ITEMS = [
     badge: null,
   },
   {
-    label: "Outreach Agent",
-    href: "/outreach",
-    icon: Send,
-    badge: "AI",
-  },
-  {
     label: "Interviews",
     href: "/interviews",
     icon: Calendar,
-    badge: null,
-  },
-  {
-    label: "Availability",
-    href: "/availability",
-    icon: Clock,
     badge: null,
   },
   {
@@ -91,24 +79,6 @@ const NAV_ITEMS = [
     href: "/openings",
     icon: Briefcase,
     badge: null,
-  },
-  {
-    label: "AI Screening",
-    href: "/screening",
-    icon: Sparkles,
-    badge: "AI",
-  },
-  {
-    label: "Compare",
-    href: "/compare",
-    icon: Scale,
-    badge: null,
-  },
-  {
-    label: "Agent Status",
-    href: "/agent",
-    icon: Sparkles,
-    badge: "Live",
   },
   {
     label: "Settings",

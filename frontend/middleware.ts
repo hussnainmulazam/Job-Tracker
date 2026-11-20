@@ -5,15 +5,20 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get("auth_token")?.value;
   const { pathname } = request.nextUrl;
 
-  // Legacy route redirections to new recruiter SaaS paths
-  if (pathname === "/applications") {
+  // Canonical 6-Page consolidation redirects
+  if (pathname === "/applications" || pathname === "/cv" || pathname === "/compare") {
     return NextResponse.redirect(new URL("/pipeline", request.url));
   }
-  if (pathname === "/ai-tools") {
-    return NextResponse.redirect(new URL("/screening", request.url));
+  if (
+    pathname === "/ai-tools" ||
+    pathname === "/screening" ||
+    pathname === "/outreach" ||
+    pathname === "/agent"
+  ) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
-  if (pathname === "/cv") {
-    return NextResponse.redirect(new URL("/pipeline", request.url));
+  if (pathname === "/availability") {
+    return NextResponse.redirect(new URL("/interviews", request.url));
   }
 
   const isAuthPage =
@@ -22,9 +27,9 @@ export function middleware(request: NextRequest) {
   const isProtectedPage =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/pipeline") ||
+    pathname.startsWith("/inbox") ||
+    pathname.startsWith("/interviews") ||
     pathname.startsWith("/openings") ||
-    pathname.startsWith("/screening") ||
-    pathname.startsWith("/compare") ||
     pathname.startsWith("/settings");
 
   // 1. Protect application routes: redirect unauthenticated users to /login

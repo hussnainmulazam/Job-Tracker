@@ -47,6 +47,8 @@ import {
   InterviewRead,
   Candidate,
 } from "@/lib/api";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AvailabilityTab } from "@/components/scheduling/availability-tab";
 import { AvailabilityModal } from "@/components/scheduling/availability-modal";
 import { RescheduleCancelModal } from "@/components/scheduling/reschedule-cancel-modal";
 import { InterviewResultModal } from "@/components/scheduling/interview-result-modal";
@@ -88,6 +90,7 @@ function addDays(date: Date, days: number): Date {
 export default function InterviewsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [mainTab, setMainTab] = useState<string>("sessions");
 
   // 1. Filter and View States
   const [activeTab, setActiveTab] = useState<ViewTab>("upcoming");
@@ -684,7 +687,20 @@ export default function InterviewsPage() {
           }
         />
 
-        {/* ── Clear Explanation Banner ─────────────────────────────────── */}
+        <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-6">
+          <TabsList className="bg-muted/40 p-1 border border-border/70 rounded-xl flex gap-1 w-full justify-start overflow-x-auto">
+            <TabsTrigger value="sessions" className="gap-2 text-xs font-semibold px-4 py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-xs">
+              <CalendarIcon className="w-3.5 h-3.5 text-primary" />
+              <span>Scheduled Sessions ({rawInterviews.length})</span>
+            </TabsTrigger>
+            <TabsTrigger value="availability" className="gap-2 text-xs font-semibold px-4 py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-xs">
+              <Clock className="w-3.5 h-3.5 text-amber-500" />
+              <span>Working Availability & Schedule</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="sessions" className="space-y-4">
+            {/* ── Clear Explanation Banner ─────────────────────────────────── */}
         <div className="rounded-2xl border border-primary/20 bg-primary/[0.035] p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
@@ -1168,6 +1184,12 @@ export default function InterviewsPage() {
             )}
           </div>
         )}
+          </TabsContent>
+
+          <TabsContent value="availability" className="space-y-4">
+            <AvailabilityTab />
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Availability Configuration Drawer/Modal */}

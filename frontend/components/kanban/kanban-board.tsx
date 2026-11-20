@@ -26,6 +26,7 @@ import {
   Table2,
   Calendar,
   Sparkles,
+  Scale,
   RotateCcw,
 } from "lucide-react";
 
@@ -48,6 +49,7 @@ import { BulkActionsToolbar } from "./bulk-actions-toolbar";
 import { AddCandidateDialog } from "@/components/candidates/add-candidate-dialog";
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
 import { ContactCandidateDialog } from "@/components/candidates/contact-candidate-dialog";
+import { CompareDialog } from "@/components/candidates/compare-dialog";
 import { ScheduleInviteModal } from "@/components/scheduling/schedule-invite-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +83,7 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   // Quick Action Dialogs State
   const [contactCandidate, setContactCandidate] = useState<Candidate | null>(null);
@@ -563,6 +566,17 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
             </Button>
 
             <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCompareOpen(true)}
+              className="h-8 font-medium gap-1.5 text-xs shadow-xs"
+              title="Side-by-side candidate comparison"
+            >
+              <Scale className="h-3.5 w-3.5 text-primary" />
+              <span>Compare</span>
+            </Button>
+
+            <Button
               size="sm"
               onClick={() => setAddDialogOpen(true)}
               className="h-8 font-medium gap-1.5 text-xs shadow-xs"
@@ -856,6 +870,13 @@ export function KanbanBoard({ defaultSelectedCandidateId }: KanbanBoardProps = {
           candidate={scheduleCandidate}
         />
       )}
+
+      {/* ── Side-by-Side Candidate Comparison Modal ─────────────────── */}
+      <CompareDialog
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+        initialOpeningId={selectedOpeningId !== "all" ? selectedOpeningId : undefined}
+      />
     </div>
   );
 }
