@@ -1,9 +1,7 @@
-from app.models.application import Application, ApplicationStatus
 from app.models.agent_settings import AgentSettings
 from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate, CandidateStage
 from app.models.candidate_link import CandidateLink
-from app.models.cv_version import CVVersion
 from app.models.email_synced import EmailSynced
 from app.models.google_account import GoogleAccount
 from app.models.interview import (
@@ -13,27 +11,20 @@ from app.models.interview import (
     SchedulingLink,
     SchedulingLinkStatus,
 )
-from app.models.job import Job
 from app.models.job_opening import JobOpening, JobOpeningStatus
 from app.models.message import Message, MessageDirection, MessageStatus, MessageType
 from app.models.notification import Notification
 from app.models.onboarding import OnboardingSetup
-from app.models.scorecard import Scorecard
 from app.models.user import User
 
 __all__ = [
     "User",
-    "Application",
-    "ApplicationStatus",
     "AuditLog",
-    "CVVersion",
-    "Job",
     "JobOpening",
     "JobOpeningStatus",
     "Candidate",
     "CandidateStage",
     "CandidateLink",
-    "Scorecard",
     "GoogleAccount",
     "EmailSynced",
     "Message",

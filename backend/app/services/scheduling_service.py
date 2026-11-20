@@ -1371,31 +1371,10 @@ class SchedulingService:
         ).first()
 
         if not candidate:
-            opening = session.exec(
-                select(JobOpening).where(JobOpening.user_id == user_id)
-            ).first()
-            if not opening:
-                opening = JobOpening(
-                    user_id=user_id,
-                    title="General Interview",
-                    description="Standard candidate screening and interview opening.",
-                    status=JobOpeningStatus.active,
-                )
-                session.add(opening)
-                session.commit()
-                session.refresh(opening)
-
-            candidate = Candidate(
-                user_id=user_id,
-                opening_id=opening.id,
-                name="Applicant Preview",
-                email="applicant@example.com",
-                cv_text="Standard applicant profile for previewing recruiter scheduling availability.",
-                stage=CandidateStage.screening,
+            raise HTTPException(
+                status_code=404,
+                detail="No candidates found. Please add a candidate before creating a scheduling link.",
             )
-            session.add(candidate)
-            session.commit()
-            session.refresh(candidate)
 
         avail = self.get_or_create_availability(session, user_id)
         slot_duration = avail.slot_duration_minutes or 30

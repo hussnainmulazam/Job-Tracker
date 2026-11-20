@@ -167,16 +167,6 @@ async def screen_candidate_cv(
         "}"
     )
 
-    # ── Check Pinecone Vector Cache for fast response (< 50ms) ───────────────
-    try:
-        from app.services.pinecone_service import pinecone_service
-        cached_eval = pinecone_service.get_cached_screening(cv_text, job_description)
-        if cached_eval:
-            logger.info("Serving candidate screening from Pinecone vector cache for '%s'", candidate_name)
-            return cached_eval
-    except Exception as cache_err:
-        logger.warning("Pinecone cache lookup skipped: %s", cache_err)
-
     messages = [
         {"role": "system", "content": system_instruction},
         {"role": "user", "content": user_prompt},
@@ -199,13 +189,6 @@ async def screen_candidate_cv(
         "model_used": model_used,
         "latency_seconds": round(latency, 2),
     }
-
-    # Asynchronously store to Pinecone vector cache for fast subsequent hits
-    try:
-        from app.services.pinecone_service import pinecone_service
-        pinecone_service.cache_screening(None, cv_text, job_description, res_dict)
-    except Exception as c_err:
-        logger.warning("Pinecone cache save error: %s", c_err)
 
     return res_dict
 

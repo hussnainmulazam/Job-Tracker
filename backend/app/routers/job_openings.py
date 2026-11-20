@@ -32,7 +32,6 @@ from app.services.candidate_service import candidate_service
 from app.services.extractor_service import extractor_service
 from app.services.google_sheets_service import google_sheets_service
 from app.services.job_opening_service import job_opening_service
-from app.services.matching_service import get_match_status, run_matching_job
 from sqlmodel import select
 
 router = APIRouter(prefix="/job-openings", tags=["Job Openings"])
@@ -212,15 +211,6 @@ async def match_candidates_for_opening(
     # Verify opening exists and belongs to recruiter
     job_opening_service.get_by_id(session, current_user.id, opening_id)
 
-    # Spawn background task
-    background_tasks.add_task(
-        run_matching_job,
-        opening_id=opening_id,
-        user_id=current_user.id,
-        rerun=rerun,
-        session=session,
-    )
-
     return MatchProgressStatus(
         opening_id=opening_id,
         status="in_progress",
@@ -249,7 +239,15 @@ def get_matching_progress(
 ) -> MatchProgressStatus:
     """Check the real-time background progress of CV matching for an opening."""
     job_opening_service.get_by_id(session, current_user.id, opening_id)
-    return get_match_status(opening_id)
+    return MatchProgressStatus(
+        opening_id=opening_id,
+        status="idle",
+        total_candidates=0,
+        processed_candidates=0,
+        matched_candidates=0,
+        progress_percent=0.0,
+        errors=[],
+    )
 
 
 # ── Bulk Score Candidates (Sync Ranking) ──────────────────────────────────────

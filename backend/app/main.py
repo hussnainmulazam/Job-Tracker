@@ -15,7 +15,6 @@ from app.routers import (
     auth_google,
     health_router,
     integrations_google,
-    debug,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -131,9 +130,6 @@ app.include_router(integrations_google.router)
 from app.routers import job_openings
 app.include_router(job_openings.router)
 app.include_router(job_openings.openings_alias_router)
-
-# Temporary debug diagnostic router
-app.include_router(debug.router)
 
 # API v1 routes (available under /api/v1)
 app.include_router(api_router, prefix=settings.API_V1_STR)

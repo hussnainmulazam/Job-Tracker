@@ -17,7 +17,6 @@ from app.routers import (
     onboarding,
     outreach,
     scheduling,
-    scorecards,
     search,
 )
 
@@ -32,7 +31,6 @@ api_router.include_router(job_openings.router)
 api_router.include_router(job_openings.openings_alias_router)
 api_router.include_router(candidates.router)
 api_router.include_router(cv_review.router)
-api_router.include_router(scorecards.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(notifications.router)
 api_router.include_router(onboarding.router)

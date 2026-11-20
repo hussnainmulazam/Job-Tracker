@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from app.models.interview import Interview, SchedulingLink
     from app.models.job_opening import JobOpening
     from app.models.message import Message
-    from app.models.scorecard import Scorecard
     from app.models.user import User
 
 
@@ -164,10 +163,6 @@ class Candidate(SQLModel, table=True):
     # Relationships
     user: Optional["User"] = Relationship(back_populates="candidates")
     job_opening: Optional["JobOpening"] = Relationship(back_populates="candidates")
-    scorecards: List["Scorecard"] = Relationship(
-        back_populates="candidate",
-        cascade_delete=True,
-    )
     links: List["CandidateLink"] = Relationship(
         back_populates="candidate",
         cascade_delete=True,

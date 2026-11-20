@@ -11,7 +11,6 @@ from app.routers.notifications import router as notifications_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.outreach import router as outreach_router
 from app.routers.scheduling import router as scheduling_router
-from app.routers.scorecards import router as scorecards_router
 from app.routers.search import router as search_router
 
 __all__ = [
@@ -24,7 +23,6 @@ __all__ = [
     "onboarding_router",
     "outreach_router",
     "scheduling_router",
-    "scorecards_router",
     "search_router",
     "dashboard_router",
     "agent_settings_router",

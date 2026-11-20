@@ -16,7 +16,6 @@ from app.schemas.extractor import CandidateConfirmPayload, ExtractedCandidateDat
 from app.services.extractor_service import extract_all_deterministic_fields
 from app.models.candidate import Candidate, CandidateStage
 from app.models.job_opening import JobOpening
-from app.models.scorecard import Scorecard
 from app.models.candidate_link import CandidateLink
 from app.models.message import Message
 from app.models.interview import Interview, SchedulingLink

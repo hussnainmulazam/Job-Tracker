@@ -7,10 +7,8 @@ from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     from app.models.agent_settings import AgentSettings
-    from app.models.application import Application
     from app.models.audit_log import AuditLog
     from app.models.candidate import Candidate
-    from app.models.cv_version import CVVersion
     from app.models.email_synced import EmailSynced
     from app.models.google_account import GoogleAccount
     from app.models.interview import AvailabilitySchedule, Interview, SchedulingLink
@@ -18,7 +16,6 @@ if TYPE_CHECKING:
     from app.models.message import Message
     from app.models.notification import Notification
     from app.models.onboarding import OnboardingSetup
-    from app.models.scorecard import Scorecard
 
 
 class User(SQLModel, table=True):
@@ -55,7 +52,6 @@ class User(SQLModel, table=True):
     # Recruiter screening relationships
     job_openings: List["JobOpening"] = Relationship(back_populates="user")
     candidates: List["Candidate"] = Relationship(back_populates="user")
-    scorecards: List["Scorecard"] = Relationship(back_populates="user")
     messages: List["Message"] = Relationship(back_populates="user")
     availability_schedule: Optional["AvailabilitySchedule"] = Relationship(
         back_populates="user",
@@ -83,7 +79,3 @@ class User(SQLModel, table=True):
         sa_relationship_kwargs={"uselist": False},
     )
     emails_synced: List["EmailSynced"] = Relationship(back_populates="user")
-
-    # Preserved legacy relationships (table not dropped)
-    applications: List["Application"] = Relationship(back_populates="user")
-    cv_versions: List["CVVersion"] = Relationship(back_populates="user")

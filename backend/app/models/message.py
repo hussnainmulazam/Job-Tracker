@@ -67,6 +67,7 @@ class Message(SQLModel, table=True):
     message_type: MessageType = Field(
         sa_column=Column(sa.String(30), nullable=False, default=MessageType.text)
     )
+    channel: Optional[str] = Field(default="email", nullable=True, max_length=30)
     body: str = Field(
         sa_column=Column(sa.Text, nullable=False)
     )
