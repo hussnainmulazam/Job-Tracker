@@ -26,6 +26,10 @@ class GoogleAccountStatusResponse(BaseModel):
     email: Optional[str] = Field(default=None, description="Linked Google account email")
     scopes: List[str] = Field(default_factory=list, description="OAuth scopes granted by recruiter")
     missing_scopes: List[str] = Field(default_factory=list, description="Required scopes that have not been granted yet")
+    granted_services: Dict[str, bool] = Field(
+        default_factory=dict,
+        description="Map of workspace services (Gmail, Calendar, Meet, Sheets, Docs, Drive) to granted status",
+    )
     reconnect_needed: bool = Field(default=False, description="Whether re-authentication is required due to missing scopes or token revocation")
     reconnect_reason: Optional[str] = Field(default=None, description="Detailed explanation for why reconnection is needed")
     last_synced_at: Optional[datetime] = Field(default=None, description="Timestamp of last Gmail sync")

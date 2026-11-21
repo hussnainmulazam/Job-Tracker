@@ -52,3 +52,14 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserPublic
 
+
+class GoogleAuthRequest(BaseModel):
+    code: str
+    redirect_uri: Optional[str] = None
+
+
+class GoogleAuthResponse(TokenResponse):
+    setup_completed: bool = False
+    is_new_user: bool = False
+
+

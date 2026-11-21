@@ -24,7 +24,12 @@ from sqlmodel import Session, select, func
 from app.core.config import settings
 from app.core.encryption import decrypt_token, encrypt_token
 from app.core.document_parser import parse_cv_document
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    create_oauth_state,
+    decode_oauth_state,
+)
 from app.core.storage import save_candidate_cv_file
 from app.models.candidate import Candidate, CandidateStage
 from app.models.candidate_link import CandidateLink
@@ -47,17 +52,22 @@ from app.services.extractor_service import extract_all_deterministic_fields
 
 logger = logging.getLogger(__name__)
 
-# Required Google API Scopes as specified by user
-GOOGLE_SCOPES = [
+# Required Google Workspace API Scopes as specified by user
+WORKSPACE_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.freebusy",
-    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/meetings.space.created",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/drive",
 ]
+GOOGLE_SCOPES = WORKSPACE_SCOPES
 
 DEFAULT_GMAIL_QUERY = "has:attachment (filename:pdf OR filename:docx) newer_than:30d"
 
@@ -81,14 +91,19 @@ class GoogleService:
         """
         Builds Google OAuth2 consent screen URL with offline access
         and prompt=consent so a refresh token is guaranteed.
-        Encodes user_id into a tamper-proof state token.
+        Encodes user_id into a tamper-proof signed state token.
         """
         client_id = settings.GOOGLE_CLIENT_ID or "placeholder-google-client-id"
-        redirect_uri = settings.GOOGLE_REDIRECT_URI
+        redirect_uri = (
+            os.getenv("GOOGLE_WORKSPACE_REDIRECT_URI")
+            or settings.GOOGLE_WORKSPACE_REDIRECT_URI
+            or "http://localhost:8000/auth/google/callback"
+        ).rstrip("/")
 
-        # State token: signed token containing user_id
-        state = create_access_token(
-            subject=str(user_id),
+        # Signed state token: flow=workspace, encodes user_id
+        state = create_oauth_state(
+            flow="workspace",
+            extra={"user_id": str(user_id)},
             expires_delta=timedelta(minutes=30),
         )
 
@@ -96,7 +111,7 @@ class GoogleService:
             "client_id": client_id,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": " ".join(GOOGLE_SCOPES),
+            "scope": " ".join(WORKSPACE_SCOPES),
             "access_type": "offline",
             "prompt": "consent",
             "state": state,
@@ -116,16 +131,24 @@ class GoogleService:
         Exchanges authorization code for tokens, encrypts the refresh token,
         fetches Google profile, and saves the GoogleAccount record.
         """
-        # 1. Verify state token
-        payload = decode_access_token(state)
-        if not payload or not payload.get("sub"):
+        # 1. Verify signed state token
+        try:
+            payload = decode_oauth_state(state)
+        except Exception:
             raise ValueError("Invalid or expired OAuth state parameter.")
 
-        user_id = uuid.UUID(payload["sub"])
+        if not payload or payload.get("flow") != "workspace" or not payload.get("user_id"):
+            raise ValueError("OAuth state parameter mismatch: expected workspace flow.")
+
+        user_id = uuid.UUID(payload["user_id"])
 
         client_id = settings.GOOGLE_CLIENT_ID
         client_secret = settings.GOOGLE_CLIENT_SECRET
-        redirect_uri = settings.GOOGLE_REDIRECT_URI
+        redirect_uri = (
+            os.getenv("GOOGLE_WORKSPACE_REDIRECT_URI")
+            or settings.GOOGLE_WORKSPACE_REDIRECT_URI
+            or "http://localhost:8000/auth/google/callback"
+        ).rstrip("/")
 
         # 2. Exchange authorization code for tokens
         token_data: Dict[str, Any] = {}
@@ -290,7 +313,7 @@ class GoogleService:
                     logger.error("Token refresh failed: %s", resp.text)
                     err_msg = resp.text
                     if "invalid_grant" in err_msg or "revoked" in err_msg or "expired" in err_msg:
-                        account.last_sync_status = "token_revoked"
+                        account.last_sync_status = "reconnect_required"
                         self.session.add(account)
                         self.session.commit()
                     raise ValueError(f"Failed to refresh Google access token: {resp.text}")
@@ -421,23 +444,29 @@ class GoogleService:
 
         granted_norms = {norm(s) for s in scopes_list}
         missing_scopes: List[str] = []
-        for req in GOOGLE_SCOPES:
+        for req in WORKSPACE_SCOPES:
             if norm(req) not in granted_norms:
                 missing_scopes.append(req)
+
+        # Service-level grant detection for the 6 required Workspace services
+        granted_services = {
+            "Gmail": any("gmail" in s for s in granted_norms),
+            "Calendar": any("calendar" in s for s in granted_norms),
+            "Meet": any("meetings" in s or "calendar" in s for s in granted_norms),
+            "Sheets": any("spreadsheets" in s for s in granted_norms),
+            "Docs": any("documents" in s for s in granted_norms),
+            "Drive": any("drive" in s for s in granted_norms),
+        }
 
         reconnect_needed = False
         reconnect_reason = None
 
-        if account.last_sync_status == "token_revoked":
+        if account.last_sync_status in ("token_revoked", "reconnect_required"):
             reconnect_needed = True
             reconnect_reason = "Google OAuth refresh token has expired or was revoked. Please reconnect."
-        elif missing_scopes:
+        elif not all(granted_services.values()) or missing_scopes:
             reconnect_needed = True
-            short_names = [norm(s) for s in missing_scopes]
-            reconnect_reason = (
-                f"Missing required permissions: {', '.join(short_names)}. "
-                "Please reconnect your account to grant full access."
-            )
+            reconnect_reason = "Partial access, reconnect to grant all"
 
         default_title: Optional[str] = None
         if account.default_opening_id:
@@ -452,6 +481,7 @@ class GoogleService:
             email=account.email,
             scopes=scopes_list,
             missing_scopes=missing_scopes,
+            granted_services=granted_services,
             reconnect_needed=reconnect_needed,
             reconnect_reason=reconnect_reason,
             last_synced_at=account.last_synced_at,

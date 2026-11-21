@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Sparkles,
@@ -263,9 +263,18 @@ function resolvePreviewText(text: string, sampleVars: Record<string, string>): s
   return res;
 }
 
+export function getFirstIncompleteStep(data?: OnboardingStatusResponse | null): number {
+  if (!data) return 1;
+  if (!data.step_1?.completed) return 1;
+  if (!data.step_2?.completed) return 2;
+  if (!data.step_3?.completed) return 3;
+  if (!data.step_4?.completed) return 4;
+  return 5;
+}
+
 export function SetupWizardDialog({
   open,
-  initialStep = 1,
+  initialStep,
   onClose,
   onboardingData,
   onSuccess,
@@ -273,7 +282,13 @@ export function SetupWizardDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeStep, setActiveStep] = useState<number>(initialStep);
+  const [activeStep, setActiveStep] = useState<number>(() => {
+    if (initialStep && initialStep >= 1 && initialStep <= 5) return initialStep;
+    return getFirstIncompleteStep(onboardingData);
+  });
+
+  const initializedStepRef = useRef(false);
+  const hasLoadedFormRef = useRef(false);
 
   // ── Step 1 State ────────────────────────────────────────────────────────────
   const [hrName, setHrName] = useState("");
@@ -317,55 +332,62 @@ export function SetupWizardDialog({
     DEFAULT_LIFECYCLE_TEMPLATES
   );
 
-  // Prepopulate form when onboardingData loads or changes
+  // Initialize active step ONCE on load / reload (opens first incomplete step if initialStep not in URL)
   useEffect(() => {
-    if (onboardingData) {
-      if (initialStep) {
-        setActiveStep(Math.min(initialStep, 5));
-      } else {
-        setActiveStep(Math.min(onboardingData.current_step, 5));
-      }
+    if (!onboardingData || initializedStepRef.current) return;
+    initializedStepRef.current = true;
 
-      // Step 1
-      if (onboardingData.step_1) {
-        setHrName(onboardingData.step_1.hr_name || "");
-        setCompanyName(onboardingData.step_1.company_name || "");
-        setHrRole(onboardingData.step_1.hr_role || "");
-        setEmailTone(onboardingData.step_1.email_tone || "warm_professional");
-        setSignature(onboardingData.step_1.signature || "");
-      }
-
-      // Step 2
-      if (onboardingData.step_2) {
-        setJobTitle(onboardingData.step_2.job_title || "");
-        setJobDescription(onboardingData.step_2.job_description || "");
-        setRequiredSkills(onboardingData.step_2.required_skills || []);
-        setYearsExperience(
-          onboardingData.step_2.years_of_experience !== null && onboardingData.step_2.years_of_experience !== undefined
-            ? onboardingData.step_2.years_of_experience
-            : ""
-        );
-      }
-
-      // Step 3
-      if (onboardingData.step_3) {
-        setTimezone(onboardingData.step_3.timezone || "Asia/Karachi");
-        setSlotDuration(onboardingData.step_3.slot_duration_minutes || 30);
-        setBufferMinutes(onboardingData.step_3.buffer_minutes || 10);
-        if (onboardingData.step_3.interview_rounds && onboardingData.step_3.interview_rounds.length > 0) {
-          setInterviewRounds(onboardingData.step_3.interview_rounds);
-        }
-      }
-
-      // Step 4
-      if (onboardingData.step_4?.templates && Object.keys(onboardingData.step_4.templates).length > 0) {
-        setTemplates((prev) => ({
-          ...DEFAULT_LIFECYCLE_TEMPLATES,
-          ...onboardingData.step_4.templates,
-        }));
-      }
+    if (initialStep && initialStep >= 1 && initialStep <= 5) {
+      setActiveStep(initialStep);
+    } else {
+      setActiveStep(getFirstIncompleteStep(onboardingData));
     }
   }, [onboardingData, initialStep]);
+
+  // Prepopulate form values ONCE when onboardingData loads (does not overwrite during save steps)
+  useEffect(() => {
+    if (!onboardingData || hasLoadedFormRef.current) return;
+    hasLoadedFormRef.current = true;
+
+    // Step 1
+    if (onboardingData.step_1) {
+      setHrName(onboardingData.step_1.hr_name || "");
+      setCompanyName(onboardingData.step_1.company_name || "");
+      setHrRole(onboardingData.step_1.hr_role || "");
+      setEmailTone(onboardingData.step_1.email_tone || "warm_professional");
+      setSignature(onboardingData.step_1.signature || "");
+    }
+
+    // Step 2
+    if (onboardingData.step_2) {
+      setJobTitle(onboardingData.step_2.job_title || "");
+      setJobDescription(onboardingData.step_2.job_description || "");
+      setRequiredSkills(onboardingData.step_2.required_skills || []);
+      setYearsExperience(
+        onboardingData.step_2.years_of_experience !== null && onboardingData.step_2.years_of_experience !== undefined
+          ? onboardingData.step_2.years_of_experience
+          : ""
+      );
+    }
+
+    // Step 3
+    if (onboardingData.step_3) {
+      setTimezone(onboardingData.step_3.timezone || "Asia/Karachi");
+      setSlotDuration(onboardingData.step_3.slot_duration_minutes || 30);
+      setBufferMinutes(onboardingData.step_3.buffer_minutes || 10);
+      if (onboardingData.step_3.interview_rounds && onboardingData.step_3.interview_rounds.length > 0) {
+        setInterviewRounds(onboardingData.step_3.interview_rounds);
+      }
+    }
+
+    // Step 4
+    if (onboardingData.step_4?.templates && Object.keys(onboardingData.step_4.templates).length > 0) {
+      setTemplates((prev) => ({
+        ...DEFAULT_LIFECYCLE_TEMPLATES,
+        ...onboardingData.step_4.templates,
+      }));
+    }
+  }, [onboardingData]);
 
   // Keep signature in sync if HR updates details and signature is untouched
   useEffect(() => {
@@ -619,12 +641,65 @@ export function SetupWizardDialog({
     saveStep3Mutation.isPending ||
     saveStep4Mutation.isPending;
 
+  const completedStepsCount = [
+    onboardingData?.step_1?.completed,
+    onboardingData?.step_2?.completed,
+    onboardingData?.step_3?.completed,
+    onboardingData?.step_4?.completed,
+  ].filter(Boolean).length;
+
+  const all4StepsCompleted = completedStepsCount === 4;
+
+  const handleSaveCurrentStep = () => {
+    if (activeStep === 1) {
+      if (!hrName.trim() || !companyName.trim() || !hrRole.trim()) {
+        toast({
+          title: "Required Fields Missing",
+          description: "Please fill in HR Full Name, Company Name, and Role.",
+          variant: "destructive",
+        });
+        return;
+      }
+      saveStep1Mutation.mutate();
+    } else if (activeStep === 2) {
+      if (!jobTitle.trim()) {
+        toast({
+          title: "Required Field Missing",
+          description: "Please provide a Job Title for your opening.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!jobDescription.trim() || jobDescription.trim().length < 20) {
+        toast({
+          title: "Job Description Too Short",
+          description: "Job description must be at least 20 characters.",
+          variant: "destructive",
+        });
+        return;
+      }
+      saveStep2Mutation.mutate();
+    } else if (activeStep === 3) {
+      if (!slotDuration || Number(slotDuration) <= 0) {
+        toast({
+          title: "Invalid Duration",
+          description: "Please enter a valid interview slot duration.",
+          variant: "destructive",
+        });
+        return;
+      }
+      saveStep3Mutation.mutate();
+    } else if (activeStep === 4) {
+      saveStep4Mutation.mutate();
+    }
+  };
+
   const stepsHeader = [
-    { num: 1, title: "HR Profile", icon: UserCheck, completed: onboardingData?.step_1?.completed },
-    { num: 2, title: "First Opening", icon: Briefcase, completed: onboardingData?.step_2?.completed },
-    { num: 3, title: "Availability", icon: Calendar, completed: onboardingData?.step_3?.completed },
-    { num: 4, title: "Templates", icon: Mail, completed: onboardingData?.step_4?.completed },
-    { num: 5, title: "Start Agent", icon: Sparkles, completed: onboardingData?.agent_started },
+    { num: 1, title: "HR Profile", icon: UserCheck, completed: Boolean(onboardingData?.step_1?.completed) },
+    { num: 2, title: "First Opening", icon: Briefcase, completed: Boolean(onboardingData?.step_2?.completed) },
+    { num: 3, title: "Availability", icon: Calendar, completed: Boolean(onboardingData?.step_3?.completed) },
+    { num: 4, title: "Templates", icon: Mail, completed: Boolean(onboardingData?.step_4?.completed) },
+    { num: 5, title: "Start Agent", icon: Sparkles, completed: Boolean(onboardingData?.agent_started) },
   ];
 
   return (
@@ -641,7 +716,7 @@ export function SetupWizardDialog({
                 Recruiter Setup Wizard
               </h2>
               <p className="text-[11px] text-muted-foreground">
-                Step {activeStep <= 4 ? activeStep : 4} of 4 • Save each step and resume anytime
+                Step {activeStep <= 4 ? activeStep : 4} of 4 • {completedStepsCount} of 4 Steps Done
               </p>
             </div>
           </div>
@@ -1437,12 +1512,17 @@ export function SetupWizardDialog({
                 <Button
                   size="lg"
                   onClick={() => startAgentMutation.mutate()}
-                  disabled={startAgentMutation.isPending}
-                  className="w-full h-11 text-sm font-bold gap-2 bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 ring-2 ring-emerald-400/40"
+                  disabled={startAgentMutation.isPending || !all4StepsCompleted}
+                  className="w-full h-11 text-sm font-bold gap-2 bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 ring-2 ring-emerald-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Sparkles className="h-4 w-4" />
                   <span>{startAgentMutation.isPending ? "Activating Agent..." : "Launch Recruiter AI Copilot"}</span>
                 </Button>
+                {!all4StepsCompleted && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2 font-medium">
+                    Please complete all 4 setup steps before launching the agent ({completedStepsCount} of 4 completed).
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -1451,7 +1531,7 @@ export function SetupWizardDialog({
         {/* ── Dialog Footer: Navigation Controls ─────────────────────────── */}
         <div className="px-5 py-3 border-t border-border/80 bg-muted/30 flex items-center justify-between shrink-0">
           <div>
-            {activeStep > 1 && activeStep <= 4 ? (
+            {activeStep > 1 ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -1490,12 +1570,7 @@ export function SetupWizardDialog({
                 <Button
                   size="sm"
                   disabled={isSaving}
-                  onClick={() => {
-                    if (activeStep === 1) saveStep1Mutation.mutate();
-                    else if (activeStep === 2) saveStep2Mutation.mutate();
-                    else if (activeStep === 3) saveStep3Mutation.mutate();
-                    else if (activeStep === 4) saveStep4Mutation.mutate();
-                  }}
+                  onClick={handleSaveCurrentStep}
                   className="h-8 text-xs font-semibold gap-1.5 shadow-xs"
                 >
                   <span>{isSaving ? "Saving..." : "Save & Continue"}</span>

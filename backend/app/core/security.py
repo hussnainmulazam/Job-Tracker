@@ -71,3 +71,28 @@ def decode_access_token(token: str) -> dict:
         algorithms=[settings.JWT_ALGORITHM],
     )
 
+
+def create_oauth_state(flow: str, extra: dict | None = None, expires_delta: timedelta | None = None) -> str:
+    """
+    Creates a signed JWT state token for OAuth flows to prevent CSRF
+    and distinguish between login and workspace flows.
+    """
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+    payload = {"flow": flow, "exp": expire}
+    if extra:
+        payload.update(extra)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_oauth_state(state: str) -> dict:
+    """
+    Decodes and validates a signed OAuth state token.
+    Raises JWTError if invalid or expired.
+    """
+    return jwt.decode(
+        state,
+        settings.JWT_SECRET_KEY,
+        algorithms=[settings.JWT_ALGORITHM],
+    )
+
+

@@ -12,7 +12,7 @@ function SetupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const stepParam = searchParams.get("step");
-  const initialStep = stepParam ? parseInt(stepParam, 10) : 1;
+  const initialStep = stepParam ? parseInt(stepParam, 10) : undefined;
 
   const { data: onboarding, isLoading } = useQuery({
     queryKey: ["onboarding-status"],

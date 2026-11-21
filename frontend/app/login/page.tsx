@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -19,6 +19,7 @@ import {
 
 import { setAuthToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import {
   Card,
   CardContent,
@@ -50,6 +51,13 @@ function LoginForm() {
 
   const [serverError, setServerError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      setServerError(decodeURIComponent(errorParam));
+    }
+  }, [searchParams]);
 
   const {
     register,
@@ -121,6 +129,25 @@ function LoginForm() {
             <div className="flex-1 font-medium">{serverError}</div>
           </div>
         )}
+
+        {/* ── Continue with Google ────────────────────────────────────── */}
+        <div className="space-y-4 mb-4">
+          <GoogleAuthButton
+            onError={(msg) => setServerError(msg)}
+            disabled={isSubmitting}
+          />
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border/80" />
+            </div>
+            <div className="relative flex justify-center text-[11px] uppercase">
+              <span className="bg-card px-2.5 text-muted-foreground font-semibold">
+                or
+              </span>
+            </div>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">

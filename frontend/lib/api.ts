@@ -17,7 +17,18 @@ export function getAuthToken(): string | null {
     return null;
   }
   try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
+    const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (stored) return stored;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryToken = urlParams.get("token");
+    if (queryToken) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, queryToken);
+      window.dispatchEvent(new Event("auth-change"));
+      return queryToken;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -598,6 +609,32 @@ export const api = {
     apiFetch<T>(endpoint, { ...options, method: "DELETE" }),
 };
 
+export interface GoogleAuthPayload {
+  code: string;
+  redirect_uri?: string;
+}
+
+export interface GoogleAuthResponse {
+  access_token: string;
+  token_type: string;
+  user: {
+    id: string;
+    email: string;
+    created_at: string;
+  };
+  setup_completed: boolean;
+  is_new_user: boolean;
+}
+
+export const authApi = {
+  getGoogleAuthUrl: (redirectUri?: string) => {
+    const params = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : "";
+    return api.get<{ url: string }>(`/api/v1/auth/google/url${params}`, { skipAuth: true });
+  },
+  authenticateGoogle: (payload: GoogleAuthPayload) =>
+    api.post<GoogleAuthResponse>("/api/v1/auth/google", payload, { skipAuth: true }),
+};
+
 // ── Domain API Services ─────────────────────────────────────────────────────
 
 export interface MatchProgressStatus {
@@ -830,6 +867,7 @@ export interface GoogleAccountStatus {
   email: string | null;
   scopes: string[];
   missing_scopes?: string[];
+  granted_services?: Record<string, boolean>;
   reconnect_needed?: boolean;
   reconnect_reason?: string | null;
   last_synced_at: string | null;

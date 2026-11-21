@@ -380,13 +380,22 @@ function SettingsPageInner() {
     if (typeof window === "undefined") return;
     const urlParams = new URLSearchParams(window.location.search);
     const connectedParam = urlParams.get("google_connected");
+    const partialParam = urlParams.get("partial");
     const errorParam = urlParams.get("google_error");
 
     if (connectedParam === "1") {
-      toast({
-        title: "Google Workspace Connected",
-        description: "Your Google account was linked with encrypted offline refresh credentials.",
-      });
+      if (partialParam === "1") {
+        toast({
+          title: "Partial Access Granted",
+          description: "Some permissions were unticked. Reconnect your account to grant full Workspace access.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Google Workspace Connected",
+          description: "Your Google account was linked with encrypted offline refresh credentials.",
+        });
+      }
       refetchGoogleStatus();
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
@@ -698,10 +707,10 @@ function SettingsPageInner() {
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 font-semibold text-xs">
                             <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                            <span>Google Permissions Update Needed</span>
+                            <span>{googleStatus.reconnect_reason?.includes("Partial") ? "Partial Google Access Detected" : "Google Permissions Update Needed"}</span>
                           </div>
                           <p className="text-[11px] text-amber-800 dark:text-amber-300">
-                            {googleStatus.reconnect_reason || "Additional scopes required for calendar sync."}
+                            {googleStatus.reconnect_reason || "Partial access, reconnect to grant all"}
                           </p>
                         </div>
                         <Button
@@ -750,18 +759,36 @@ function SettingsPageInner() {
                         </div>
                       </div>
 
-                      {/* Scopes */}
-                      <div className="pt-2 border-t border-border/60 space-y-1.5">
-                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                          <ShieldCheck className="h-3 w-3 text-primary" />
-                          <span>Authorized Scopes (Fernet Encrypted at Rest)</span>
+                      {/* Workspace Services Granted Status */}
+                      <div className="pt-2 border-t border-border/60 space-y-2">
+                        <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
+                          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                          <span>Connected Workspace Services</span>
                         </span>
-                        <div className="flex flex-wrap gap-1">
-                          {googleStatus.scopes.map((scope) => (
-                            <Badge key={scope} variant="secondary" className="text-[10px] font-mono px-2 py-0.5">
-                              {scope.replace("https://www.googleapis.com/auth/", "")}
-                            </Badge>
-                          ))}
+                        <div className="flex flex-wrap gap-1.5">
+                          {["Gmail", "Calendar", "Meet", "Sheets", "Docs", "Drive"].map((srv) => {
+                            const isGranted = googleStatus.granted_services
+                              ? Boolean(googleStatus.granted_services[srv])
+                              : true;
+                            return (
+                              <Badge
+                                key={srv}
+                                variant={isGranted ? "secondary" : "outline"}
+                                className={`text-[10px] font-medium px-2 py-0.5 flex items-center gap-1 ${
+                                  isGranted
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                    : "bg-destructive/10 text-destructive border-destructive/20 line-through opacity-70"
+                                }`}
+                              >
+                                {isGranted ? (
+                                  <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />
+                                ) : (
+                                  <AlertCircle className="h-2.5 w-2.5 text-destructive" />
+                                )}
+                                <span>{srv}</span>
+                              </Badge>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>

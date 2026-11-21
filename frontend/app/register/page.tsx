@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -20,6 +20,7 @@ import {
 
 import { setAuthToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import {
   Card,
   CardContent,
@@ -52,11 +53,19 @@ const registerSchema = z
 
 type RegisterFormValues = z.infer<typeof registerSchema>;
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [serverError, setServerError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      setServerError(decodeURIComponent(errorParam));
+    }
+  }, [searchParams]);
 
   const {
     register,
@@ -107,8 +116,8 @@ export default function RegisterPage() {
         setAuthToken(data.access_token);
       }
 
-      // 3. Navigate directly to dashboard
-      window.location.href = "/dashboard";
+      // 3. New email registration goes to setup wizard
+      window.location.href = "/setup";
     } catch (err) {
       setServerError(
         "Unable to connect to registration service. Please verify your internet connection."
@@ -138,6 +147,25 @@ export default function RegisterPage() {
               <div className="flex-1 font-medium">{serverError}</div>
             </div>
           )}
+
+          {/* ── Continue with Google ────────────────────────────────────── */}
+          <div className="space-y-4 mb-4">
+            <GoogleAuthButton
+              onError={(msg) => setServerError(msg)}
+              disabled={isSubmitting}
+            />
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border/80" />
+              </div>
+              <div className="relative flex justify-center text-[11px] uppercase">
+                <span className="bg-card px-2.5 text-muted-foreground font-semibold">
+                  or
+                </span>
+              </div>
+            </div>
+          </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             {/* Email Field */}
@@ -283,6 +311,14 @@ export default function RegisterPage() {
         </CardFooter>
       </Card>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <RegisterForm />
+    </Suspense>
   );
 }
 

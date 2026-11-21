@@ -59,6 +59,22 @@ def _get_default_templates(
     )
 
 
+def _check_and_update_all_done(onboarding: OnboardingSetup) -> bool:
+    """Checks whether all 4 onboarding steps are complete, updating is_completed and current_step."""
+    all_done = (
+        bool(onboarding.step_1_completed)
+        and bool(onboarding.step_2_completed)
+        and bool(onboarding.step_3_completed)
+        and bool(onboarding.step_4_completed)
+    )
+    if all_done:
+        onboarding.is_completed = True
+        if onboarding.current_step <= 4:
+            onboarding.current_step = 5
+    return all_done
+
+
+
 def _get_or_create_onboarding(session: SessionDep, user_id: uuid.UUID) -> OnboardingSetup:
     """Retrieve existing onboarding setup record or initialize a new one with sensible defaults."""
     record = session.exec(
@@ -250,6 +266,7 @@ def save_step_1(
             email_tone=onboarding.email_tone,
         )
 
+    _check_and_update_all_done(onboarding)
     onboarding.updated_at = datetime.now(timezone.utc)
     session.add(onboarding)
     session.commit()
@@ -325,6 +342,7 @@ def save_step_2(
     if onboarding.current_step <= 2:
         onboarding.current_step = 3
 
+    _check_and_update_all_done(onboarding)
     onboarding.updated_at = datetime.now(timezone.utc)
     session.add(onboarding)
     session.commit()
@@ -383,6 +401,7 @@ def save_step_3(
     if onboarding.current_step <= 3:
         onboarding.current_step = 4
 
+    _check_and_update_all_done(onboarding)
     onboarding.updated_at = datetime.now(timezone.utc)
     session.add(onboarding)
     session.commit()
@@ -411,16 +430,7 @@ def save_step_4(
     onboarding.templates = raw_templates
     onboarding.step_4_completed = True
 
-    # Check if all 4 steps are complete
-    all_done = (
-        onboarding.step_1_completed
-        and onboarding.step_2_completed
-        and onboarding.step_3_completed
-        and onboarding.step_4_completed
-    )
-    if all_done:
-        onboarding.is_completed = True
-        onboarding.current_step = 5
+    _check_and_update_all_done(onboarding)
 
     onboarding.updated_at = datetime.now(timezone.utc)
     session.add(onboarding)

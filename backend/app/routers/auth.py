@@ -8,15 +8,25 @@ Authentication endpoints:
   POST /api/v1/auth/login/form — OAuth2 form-compatible login (Swagger UI)
   GET  /api/v1/auth/me         — return current authenticated user
 """
-from typing import Annotated
+import json
+import urllib.parse
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.dependencies import CurrentUser
 from app.core.rate_limit import rate_limit
 from app.db import SessionDep
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserPublic
+from app.schemas.auth import (
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserPublic,
+    GoogleAuthRequest,
+    GoogleAuthResponse,
+)
 from app.services.auth_service import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -117,4 +127,136 @@ def me(current_user: CurrentUser) -> UserPublic:
     Returns HTTP 401 if the token is missing, expired, or invalid.
     """
     return UserPublic.model_validate(current_user)
+
+
+# ── Google OAuth Login / Signup ──────────────────────────────────────────────
+
+@router.get(
+    "/google/url",
+    summary="Get Google OAuth2 authorization URL for login / signup",
+)
+def google_auth_url():
+    """
+    Returns the Google OAuth2 consent URL for recruiter login/signup.
+    Includes a signed state token to prevent CSRF and isolate the login flow.
+    """
+    try:
+        url = auth_service.get_google_auth_url()
+        return {"url": url}
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+@router.get(
+    "/google/login",
+    summary="Direct full-page redirect to Google OAuth2 consent screen for login/signup",
+)
+def google_login():
+    """
+    Redirects recruiter browser to Google OAuth2 consent screen.
+    """
+    try:
+        url = auth_service.get_google_auth_url()
+        return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+@router.get(
+    "/google/callback",
+    summary="Google OAuth2 login and signup callback handler",
+)
+def google_callback(
+    session: SessionDep,
+    code: Optional[str] = Query(default=None),
+    state: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+):
+    """
+    Handles redirect callback from Google OAuth2 consent screen for recruiter login and signup.
+    Exchanges code for tokens using GOOGLE_LOGIN_REDIRECT_URI, verifies state token,
+    finds or creates user, issues JWT session, sets auth cookie, and redirects to frontend callback page.
+    """
+    from app.core.config import settings
+
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+
+    # 1. Google-level consent error or user denial
+    if error:
+        if error == "access_denied":
+            error_msg = "Google sign-in was cancelled."
+        else:
+            error_msg = f"Google sign-in error: {error}"
+        return RedirectResponse(
+            url=f"{frontend_url}/login?error={urllib.parse.quote(error_msg)}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # 2. Missing authorization code
+    if not code:
+        error_msg = "Missing authorization code from Google."
+        return RedirectResponse(
+            url=f"{frontend_url}/login?error={urllib.parse.quote(error_msg)}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # 3. Exchange code for tokens, verify state, create/find user, issue session
+    try:
+        auth_res = auth_service.authenticate_google(session=session, code=code, state=state)
+    except ValueError as exc:
+        error_msg = str(exc)
+        return RedirectResponse(
+            url=f"{frontend_url}/login?error={urllib.parse.quote(error_msg)}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # 4. Success: redirect to frontend callback page with token and setup status
+    setup_str = "true" if auth_res.setup_completed else "false"
+    token = auth_res.access_token
+
+    redirect_url = f"{frontend_url}/auth/callback?token={urllib.parse.quote(token)}&setup_completed={setup_str}"
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
+
+    # Also set HTTP-only cookie on response for localhost
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        max_age=60 * 60 * 24 * 7,  # 7 days
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+    return response
+
+
+@router.post(
+    "/google",
+    response_model=GoogleAuthResponse,
+    summary="Authenticate or register user via Google OAuth2 authorization code",
+    dependencies=[Depends(rate_limit(times=15, seconds=60, scope="auth:google"))],
+)
+def google_authenticate(body: GoogleAuthRequest, session: SessionDep) -> GoogleAuthResponse:
+    """
+    Exchanges code for tokens, verifies profile, logs in or registers user,
+    and returns JWT token + setup_completed status.
+    """
+    try:
+        return auth_service.authenticate_google(
+            session=session,
+            code=body.code,
+            redirect_uri=body.redirect_uri,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
 
