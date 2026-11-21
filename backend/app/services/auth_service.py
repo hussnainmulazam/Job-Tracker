@@ -4,6 +4,7 @@ app/services/auth_service.py
 Business logic for user registration, login, and lookup.
 Keeps routers thin — all DB queries and security calls live here.
 """
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -95,10 +96,14 @@ class AuthService:
         target_redirect_uri = (
             os.getenv("GOOGLE_LOGIN_REDIRECT_URI")
             or settings.GOOGLE_LOGIN_REDIRECT_URI
-            or "http://localhost:8000/api/v1/auth/google/callback"
+            or "http://localhost:8000/auth/google/callback"
         ).rstrip("/")
 
-        state = create_oauth_state(flow="login")
+        state = create_oauth_state(
+            flow="login",
+            extra={"redirect_uri": target_redirect_uri},
+            expires_delta=timedelta(minutes=15),
+        )
 
         params = {
             "client_id": client_id,
@@ -131,6 +136,7 @@ class AuthService:
         from app.routers.onboarding import _get_default_templates
 
         # Verify state if provided
+        state_data = {}
         if state:
             try:
                 state_data = decode_oauth_state(state)
@@ -145,9 +151,10 @@ class AuthService:
             raise ValueError("Google OAuth credentials are not configured on the server. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
 
         target_redirect_uri = (
-            os.getenv("GOOGLE_LOGIN_REDIRECT_URI")
+            (state_data.get("redirect_uri") if state_data else None)
+            or os.getenv("GOOGLE_LOGIN_REDIRECT_URI")
             or settings.GOOGLE_LOGIN_REDIRECT_URI
-            or "http://localhost:8000/api/v1/auth/google/callback"
+            or "http://localhost:8000/auth/google/callback"
         ).rstrip("/")
 
         # 1. Exchange authorization code for tokens

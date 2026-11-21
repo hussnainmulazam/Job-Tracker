@@ -151,26 +151,8 @@ def google_auth_url():
 
 
 @router.get(
-    "/google/login",
-    summary="Direct full-page redirect to Google OAuth2 consent screen for login/signup",
-)
-def google_login():
-    """
-    Redirects recruiter browser to Google OAuth2 consent screen.
-    """
-    try:
-        url = auth_service.get_google_auth_url()
-        return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
-        )
-
-
-@router.get(
     "/google/callback",
-    summary="Google OAuth2 login and signup callback handler",
+    summary="Google OAuth2 login and signup callback handler (supports both Login and Workspace flows)",
 )
 def google_callback(
     session: SessionDep,
@@ -179,34 +161,77 @@ def google_callback(
     error: Optional[str] = Query(default=None),
 ):
     """
-    Handles redirect callback from Google OAuth2 consent screen for recruiter login and signup.
-    Exchanges code for tokens using GOOGLE_LOGIN_REDIRECT_URI, verifies state token,
-    finds or creates user, issues JWT session, sets auth cookie, and redirects to frontend callback page.
+    Handles redirect callback from Google OAuth2 consent screen.
+    Dispatches based on signed state token:
+      - flow="login": exchanges code for tokens, finds/creates user, issues JWT session, sets auth cookie, redirects to /auth/callback.
+      - flow="workspace": exchanges code, stores encrypted refresh token, redirects to /settings?google_connected=1&tab=google.
     """
     from app.core.config import settings
+    from app.core.security import decode_oauth_state
+    from app.services.google_service import GoogleService
 
     frontend_url = settings.FRONTEND_URL.rstrip("/")
 
+    # Detect flow from signed state
+    flow = "login"
+    if state:
+        try:
+            state_data = decode_oauth_state(state)
+            flow = state_data.get("flow", "login")
+        except Exception:
+            flow = "login"
+
     # 1. Google-level consent error or user denial
     if error:
-        if error == "access_denied":
-            error_msg = "Google sign-in was cancelled."
-        else:
-            error_msg = f"Google sign-in error: {error}"
+        error_msg = "Google sign-in was cancelled." if error == "access_denied" else f"Google error: {error}"
+        if flow == "workspace":
+            return RedirectResponse(
+                url=f"{frontend_url}/settings?google_error={urllib.parse.quote(error_msg)}&tab=google",
+                status_code=status.HTTP_302_FOUND,
+            )
         return RedirectResponse(
             url=f"{frontend_url}/login?error={urllib.parse.quote(error_msg)}",
             status_code=status.HTTP_302_FOUND,
         )
 
-    # 2. Missing authorization code
+    # 2. Missing authorization code or state
     if not code:
-        error_msg = "Missing authorization code from Google."
+        if flow == "workspace":
+            return RedirectResponse(
+                url=f"{frontend_url}/settings?google_error=Missing+authorization+code+from+Google.&tab=google",
+                status_code=status.HTTP_302_FOUND,
+            )
         return RedirectResponse(
-            url=f"{frontend_url}/login?error={urllib.parse.quote(error_msg)}",
+            url=f"{frontend_url}/login?error=Missing+authorization+code+from+Google.",
             status_code=status.HTTP_302_FOUND,
         )
 
-    # 3. Exchange code for tokens, verify state, create/find user, issue session
+    if not state:
+        if flow == "workspace":
+            return RedirectResponse(
+                url=f"{frontend_url}/settings?google_error=Missing+state+parameter+or+CSRF+detected.&tab=google",
+                status_code=status.HTTP_302_FOUND,
+            )
+        return RedirectResponse(
+            url=f"{frontend_url}/login?error=Missing+state+parameter+or+CSRF+detected.",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # 3. Handle Flow B: Workspace Connection
+    if flow == "workspace":
+        service = GoogleService(session)
+        try:
+            account, user_id = service.handle_callback(code, state)
+        except ValueError as exc:
+            return RedirectResponse(
+                url=f"{frontend_url}/settings?google_error={urllib.parse.quote(str(exc))}&tab=google",
+                status_code=status.HTTP_302_FOUND,
+            )
+        status_param = "google_connected=1&partial=1" if account.last_sync_status == "partial_access" else "google_connected=1"
+        redirect_target = f"{frontend_url}/settings?{status_param}&email={urllib.parse.quote(account.email)}&tab=google"
+        return RedirectResponse(url=redirect_target, status_code=status.HTTP_302_FOUND)
+
+    # 4. Handle Flow A: User Login / Signup
     try:
         auth_res = auth_service.authenticate_google(session=session, code=code, state=state)
     except ValueError as exc:
@@ -216,7 +241,6 @@ def google_callback(
             status_code=status.HTTP_302_FOUND,
         )
 
-    # 4. Success: redirect to frontend callback page with token and setup status
     setup_str = "true" if auth_res.setup_completed else "false"
     token = auth_res.access_token
 

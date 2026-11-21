@@ -100,10 +100,10 @@ class GoogleService:
             or "http://localhost:8000/auth/google/callback"
         ).rstrip("/")
 
-        # Signed state token: flow=workspace, encodes user_id
+        # Signed state token: flow=workspace, encodes user_id and redirect_uri
         state = create_oauth_state(
             flow="workspace",
-            extra={"user_id": str(user_id)},
+            extra={"user_id": str(user_id), "redirect_uri": redirect_uri},
             expires_delta=timedelta(minutes=30),
         )
 
@@ -145,7 +145,8 @@ class GoogleService:
         client_id = settings.GOOGLE_CLIENT_ID
         client_secret = settings.GOOGLE_CLIENT_SECRET
         redirect_uri = (
-            os.getenv("GOOGLE_WORKSPACE_REDIRECT_URI")
+            payload.get("redirect_uri")
+            or os.getenv("GOOGLE_WORKSPACE_REDIRECT_URI")
             or settings.GOOGLE_WORKSPACE_REDIRECT_URI
             or "http://localhost:8000/auth/google/callback"
         ).rstrip("/")
@@ -216,7 +217,15 @@ class GoogleService:
             except Exception as e:
                 logger.warning("Could not fetch userinfo from Google: %s", e)
 
-        # 4. Check if account already exists for user
+        # 4. Check granted scopes against required workspace scopes
+        def _norm_scope(s: str) -> str:
+            return s.lower().replace("https://www.googleapis.com/auth/", "").strip()
+
+        granted_norms = {_norm_scope(s) for s in granted_scopes}
+        missing_scopes = [req for req in WORKSPACE_SCOPES if _norm_scope(req) not in granted_norms]
+        initial_status = "partial_access" if missing_scopes else "connected"
+
+        # 5. Check if account already exists for user
         account = self.session.exec(
             select(GoogleAccount).where(GoogleAccount.user_id == user_id)
         ).first()
@@ -230,7 +239,7 @@ class GoogleService:
             account.access_token = access_token
             account.token_expires_at = token_expires_at
             account.scopes = granted_scopes
-            account.last_sync_status = "connected"
+            account.last_sync_status = initial_status
             account.updated_at = datetime.now(timezone.utc)
         else:
             if not refresh_token:
@@ -245,7 +254,7 @@ class GoogleService:
                 scopes=granted_scopes,
                 sync_query=DEFAULT_GMAIL_QUERY,
                 sync_label="INBOX",
-                last_sync_status="connected",
+                last_sync_status=initial_status,
             )
             self.session.add(account)
 
