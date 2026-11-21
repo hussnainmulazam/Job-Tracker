@@ -51,7 +51,8 @@ from app.schemas.scheduling import (
 )
 from app.services.audit_log_service import audit_log_service
 from app.services.google_service import GoogleService
-from app.services.template_service import fill_template_variables, get_default_templates
+from app.services.template_service import fill_template_variables, get_default_templates, render_user_template
+from app.core.events import agent_events
 from app.schemas.google import GoogleSendEmailRequest
 
 logger = logging.getLogger(__name__)
@@ -1752,7 +1753,6 @@ class SchedulingService:
                 )
                 next_url = f"{public_base}/schedule/{next_link.token}"
 
-                tpl_cfg = user_templates.get("initial_passed") or defaults.get("initial_passed", {})
                 template_vars = {
                     "candidate_name": candidate.name,
                     "role": role_title,
@@ -1765,13 +1765,8 @@ class SchedulingService:
                     "job_details": opening.description if opening and opening.description else "",
                     "signature": f"Warm regards,\n{hr_name}\n{company_name}",
                 }
-                sub = fill_template_variables(
-                    tpl_cfg.get("subject", "Great speaking with you! Next steps for {role} at {company}"),
-                    template_vars,
-                )
-                body = fill_template_variables(
-                    tpl_cfg.get("body", "Hi {candidate_name},\n\nWe loved speaking with you! Please book your Behavioral round here: {schedule_link}"),
-                    template_vars,
+                sub, _, body, _ = render_user_template(
+                    session, user_id, "initial_passed", template_vars
                 )
 
                 # Record message
@@ -1842,7 +1837,6 @@ class SchedulingService:
                 )
                 next_url = f"{public_base}/schedule/{next_link.token}"
 
-                tpl_cfg = user_templates.get("behavioral_passed") or defaults.get("behavioral_passed", {})
                 template_vars = {
                     "candidate_name": candidate.name,
                     "role": role_title,
@@ -1855,13 +1849,8 @@ class SchedulingService:
                     "job_details": opening.description if opening and opening.description else "",
                     "signature": f"Warm regards,\n{hr_name}\n{company_name}",
                 }
-                sub = fill_template_variables(
-                    tpl_cfg.get("subject", "Wonderful feedback on your interview for {role} at {company}"),
-                    template_vars,
-                )
-                body = fill_template_variables(
-                    tpl_cfg.get("body", "Hi {candidate_name},\n\nThe team loved meeting with you! Book your Final round here: {schedule_link}"),
-                    template_vars,
+                sub, _, body, _ = render_user_template(
+                    session, user_id, "behavioral_passed", template_vars
                 )
 
                 # Record message
@@ -1920,7 +1909,6 @@ class SchedulingService:
 
             # Case 1C: Final Passed -> Creates Offer draft. NEVER SENDS AUTOMATICALLY!
             else:
-                tpl_cfg = user_templates.get("offer_letter") or defaults.get("offer_letter", {})
                 template_vars = {
                     "candidate_name": candidate.name,
                     "role": role_title,
@@ -1929,13 +1917,8 @@ class SchedulingService:
                     "job_details": opening.description if opening and opening.description else "",
                     "signature": f"Warm regards,\n{hr_name}\n{company_name}",
                 }
-                offer_sub = fill_template_variables(
-                    tpl_cfg.get("subject", "Offer of Employment: Welcome to {company}!"),
-                    template_vars,
-                )
-                offer_body = fill_template_variables(
-                    tpl_cfg.get("body", "Hi {candidate_name},\n\nOn behalf of everyone at {company}, I am thrilled to extend an offer for the {role} position!"),
-                    template_vars,
+                offer_sub, _, offer_body, _ = render_user_template(
+                    session, user_id, "offer_letter", template_vars
                 )
 
                 candidate.stage = CandidateStage.offer
@@ -1993,7 +1976,6 @@ class SchedulingService:
             candidate.review_status = "rejected"
             candidate.updated_at = now_utc
 
-            tpl_cfg = user_templates.get("rejection") or defaults.get("rejection", {})
             template_vars = {
                 "candidate_name": candidate.name,
                 "role": role_title,
@@ -2001,13 +1983,8 @@ class SchedulingService:
                 "hr_name": hr_name,
                 "signature": f"Warm regards,\n{hr_name}\n{company_name}",
             }
-            sub = fill_template_variables(
-                tpl_cfg.get("subject", "Update on your application for {role} at {company}"),
-                template_vars,
-            )
-            body = fill_template_variables(
-                tpl_cfg.get("body", "Hi {candidate_name},\n\nThank you for taking the time to interview with us. At this time, we have decided to move forward with other candidates.\n\nWe wish you all the best in your search."),
-                template_vars,
+            sub, _, body, _ = render_user_template(
+                session, user_id, "rejection", template_vars
             )
 
             msg = Message(
@@ -2025,6 +2002,21 @@ class SchedulingService:
             )
             session.add(msg)
             self._try_send_gmail(session, user_id, candidate.id, candidate.email, sub, body, "rejection")
+
+            try:
+                agent_events.emit_sync(user_id, "status_changed", {
+                    "candidate_id": str(candidate.id),
+                    "candidate_name": candidate.name,
+                    "status": "rejected",
+                    "stage": "rejected",
+                })
+                agent_events.emit_sync(user_id, "email_sent", {
+                    "candidate_id": str(candidate.id),
+                    "candidate_name": candidate.name,
+                    "template_id": "rejection",
+                })
+            except Exception:
+                pass
 
             session.add(candidate)
             session.add(interview)
@@ -2139,7 +2131,6 @@ class SchedulingService:
         body = draft_dict.get("body")
 
         if not subject or not body:
-            tpl_cfg = user_templates.get("offer_letter") or defaults.get("offer_letter", {})
             template_vars = {
                 "candidate_name": candidate.name,
                 "role": role_title,
@@ -2148,13 +2139,8 @@ class SchedulingService:
                 "job_details": opening.description if opening and opening.description else "",
                 "signature": f"Warm regards,\n{hr_name}\n{company_name}",
             }
-            subject = fill_template_variables(
-                tpl_cfg.get("subject", "Offer of Employment: Welcome to {company}!"),
-                template_vars,
-            )
-            body = fill_template_variables(
-                tpl_cfg.get("body", "Hi {candidate_name},\n\nOn behalf of everyone at {company}, I am thrilled to extend an offer for the {role} position!"),
-                template_vars,
+            subject, _, body, _ = render_user_template(
+                session, user_id, "offer_letter", template_vars
             )
             candidate.offer_letter_draft = {
                 "subject": subject,

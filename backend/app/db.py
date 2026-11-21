@@ -103,6 +103,13 @@ def init_db() -> None:
                     updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
             """))
+            # Performance optimization indexes (Task 3: candidate_id, user_id, status, created_at, updated_at, stage)
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_messages_candidate_user_created ON messages (candidate_id, user_id, created_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (user_id, created_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_candidates_user_created ON candidates (user_id, created_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_candidates_user_updated ON candidates (user_id, updated_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_candidates_user_stage ON candidates (user_id, stage);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_candidates_user_review_status ON candidates (user_id, review_status);"))
             conn.commit()
 
 

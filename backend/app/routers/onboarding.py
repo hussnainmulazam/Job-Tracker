@@ -41,6 +41,7 @@ from app.services.template_service import (
     fill_template_variables,
     generate_recruiting_templates_ai,
     get_default_templates,
+    clear_user_template_cache,
 )
 
 router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
@@ -272,6 +273,8 @@ def save_step_1(
     session.commit()
     session.refresh(onboarding)
 
+    clear_user_template_cache(current_user.id)
+
     return _build_status_response(onboarding)
 
 
@@ -348,6 +351,8 @@ def save_step_2(
     session.commit()
     session.refresh(onboarding)
 
+    clear_user_template_cache(current_user.id)
+
     return _build_status_response(onboarding)
 
 
@@ -407,6 +412,8 @@ def save_step_3(
     session.commit()
     session.refresh(onboarding)
 
+    clear_user_template_cache(current_user.id)
+
     return _build_status_response(onboarding)
 
 
@@ -436,6 +443,8 @@ def save_step_4(
     session.add(onboarding)
     session.commit()
     session.refresh(onboarding)
+
+    clear_user_template_cache(current_user.id)
 
     return _build_status_response(onboarding)
 
@@ -563,6 +572,7 @@ async def generate_templates_endpoint(
     session.add(onboarding)
     session.commit()
     session.refresh(onboarding)
+    clear_user_template_cache(current_user.id)
 
     # Format response
     templates_response: Dict[str, EmailTemplateItem] = {}

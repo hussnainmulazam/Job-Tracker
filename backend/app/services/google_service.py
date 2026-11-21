@@ -1240,60 +1240,28 @@ class GoogleService:
             "slot_link": slot_link,
         }
 
-        # Select template
+        # Resolve template from database (single source of truth)
+        from app.services.template_service import render_user_template, fill_template_variables
         tmpl = request.template_name.lower()
-        if tmpl in ("initial_message", "cv_received"):
-            subject = f"Application Received: {role_name} at {company_name}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Thank you for submitting your CV for the {role_name} position at {company_name}. "
-                f"We have received your application and our recruitment team is reviewing your profile.\n\n"
-                f"If your background aligns with our criteria, we will reach out shortly regarding next steps.\n\n"
-                f"Best regards,\n"
-                f"Recruiting & Talent Acquisition Team\n{company_name}"
-            )
-        elif tmpl == "interview_invitation":
-            subject = f"Interview Invitation: {role_name} at {company_name}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Thank you for applying for the {role_name} position at {company_name}. "
-                f"We were impressed by your background and experience, and we would like to invite you to an interview.\n\n"
-                f"Please select a time slot that works best for you using our self-scheduling link:\n"
-                f"{slot_link}\n\n"
-                f"We look forward to speaking with you!\n\n"
-                f"Best regards,\n"
-                f"Hiring Team\n{company_name}"
-            )
-        elif tmpl == "candidate_followup":
-            subject = f"Update on your application for {role_name} at {company_name}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Thank you for taking the time to interview with us for the {role_name} role at {company_name}. "
-                f"Our team is currently completing candidate evaluations and will share the next steps with you shortly.\n\n"
-                f"Please feel free to reach out if you have any questions in the meantime.\n\n"
-                f"Best regards,\n"
-                f"Hiring Team\n{company_name}"
-            )
-        elif tmpl == "rejection":
-            subject = f"Application Status: {role_name} at {company_name}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Thank you for your interest in the {role_name} role at {company_name} and for taking the time to share your background with us.\n\n"
-                f"After careful review of your qualifications alongside our current organizational requirements, "
-                f"we have decided to proceed with other applicants whose experience more closely aligns with this particular role.\n\n"
-                f"We genuinely appreciate your time and wish you continued success in your job search.\n\n"
-                f"Sincerely,\n"
-                f"Talent Acquisition Team\n{company_name}"
-            )
-        else:
-            # Custom template
+        if tmpl in ("custom", ""):
             subject = request.custom_subject or f"Regarding your application for {role_name}"
             body = request.custom_body or f"Hi {candidate.name},\n\nThank you for your interest in {company_name}."
-
-        # Interpolate variables in custom text as well
-        for key, val in variables.items():
-            subject = subject.replace(f"{{{key}}}", str(val))
-            body = body.replace(f"{{{key}}}", str(val))
+            subject = fill_template_variables(subject, variables)
+            body = fill_template_variables(body, variables)
+        else:
+            try:
+                subject, html_body, body, _ = render_user_template(
+                    session=self.session,
+                    user_id=user_id,
+                    template_id=tmpl,
+                    context=variables,
+                )
+            except Exception as render_err:
+                logger.warning("Could not render template %s from DB: %s. Using custom fallback.", tmpl, render_err)
+                subject = request.custom_subject or f"Regarding your application for {role_name}"
+                body = request.custom_body or f"Hi {candidate.name},\n\nThank you for your interest in {company_name}."
+                subject = fill_template_variables(subject, variables)
+                body = fill_template_variables(body, variables)
 
         return GooglePreviewEmailResponse(
             candidate_id=candidate.id,

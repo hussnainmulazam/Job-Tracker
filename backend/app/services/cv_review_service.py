@@ -34,7 +34,8 @@ from app.schemas.candidate import (
 from app.services.ai import screen_candidate_cv
 from app.services.audit_log_service import audit_log_service
 from app.services.scheduling_service import scheduling_service
-from app.services.template_service import fill_template_variables, get_default_templates
+from app.services.template_service import fill_template_variables, get_default_templates, render_user_template
+from app.core.events import agent_events
 
 logger = logging.getLogger(__name__)
 
@@ -270,26 +271,12 @@ class CVReviewService:
                     "signature": f"Warm regards,\n{hr_name}\n{company_name}",
                 }
 
-                # 3. Resolve CV Passed & Job Details templates
-                cv_passed_cfg = templates_map.get("cv_passed") or defaults.get("cv_passed", {})
-                job_details_cfg = templates_map.get("job_details") or defaults.get("job_details", {})
-
-                cv_passed_sub = fill_template_variables(
-                    cv_passed_cfg.get("subject", "Great news regarding your application for {role} at {company}"),
-                    template_vars,
+                # 3. Resolve CV Passed & Job Details templates strictly from DB via render_user_template
+                cv_passed_sub, _, cv_passed_body, _ = render_user_template(
+                    session, user_id, "cv_passed", template_vars
                 )
-                cv_passed_body = fill_template_variables(
-                    cv_passed_cfg.get("body", "Hi {candidate_name},\n\nYour background caught our eye! Book here: {schedule_link}"),
-                    template_vars,
-                )
-
-                job_details_sub = fill_template_variables(
-                    job_details_cfg.get("subject", "More details on the {role} opportunity at {company}"),
-                    template_vars,
-                )
-                job_details_body = fill_template_variables(
-                    job_details_cfg.get("body", "Hi {candidate_name},\n\nHere is an overview of what you'll be driving as {role} at {company}:\n\n{job_details}"),
-                    template_vars,
+                job_details_sub, _, job_details_body, _ = render_user_template(
+                    session, user_id, "job_details", template_vars
                 )
 
                 emails_dispatched = []
@@ -381,6 +368,22 @@ class CVReviewService:
                 session.add(notif)
                 session.add(cand)
 
+                try:
+                    agent_events.emit_sync(user_id, "status_changed", {
+                        "candidate_id": str(cand.id),
+                        "candidate_name": cand.name,
+                        "status": "approved",
+                        "stage": "shortlisted",
+                        "action": "approve",
+                    })
+                    agent_events.emit_sync(user_id, "email_sent", {
+                        "candidate_id": str(cand.id),
+                        "candidate_name": cand.name,
+                        "template_id": "cv_passed",
+                    })
+                except Exception:
+                    pass
+
                 approved_count += 1
                 results.append(
                     CVReviewDecisionItem(
@@ -410,18 +413,9 @@ class CVReviewService:
                     "signature": f"Sincerely,\n{hr_name}\n{company_name}",
                 }
 
-                rejection_cfg = templates_map.get("rejection") or defaults.get("rejection", {})
-                rejection_sub = fill_template_variables(
-                    rejection_cfg.get("subject", "Update on your application for {role} at {company}"),
-                    template_vars,
-                )
-                rejection_body = fill_template_variables(
-                    rejection_cfg.get(
-                        "body",
-                        "Hi {candidate_name},\n\nThank you for applying for the {role} position at {company}. "
-                        "We have decided to move forward with other candidates at this time. We wish you all the best.",
-                    ),
-                    template_vars,
+                # Resolve Rejection template strictly from DB via render_user_template
+                rejection_sub, _, rejection_body, _ = render_user_template(
+                    session, user_id, "rejection", template_vars
                 )
 
                 emails_dispatched = []
@@ -477,6 +471,22 @@ class CVReviewService:
                         f"Rejection email dispatched. {f'Note: {payload.notes}' if payload.notes else ''}"
                     ).strip(),
                 )
+
+                try:
+                    agent_events.emit_sync(user_id, "status_changed", {
+                        "candidate_id": str(cand.id),
+                        "candidate_name": cand.name,
+                        "status": "rejected",
+                        "stage": "rejected",
+                        "action": "reject",
+                    })
+                    agent_events.emit_sync(user_id, "email_sent", {
+                        "candidate_id": str(cand.id),
+                        "candidate_name": cand.name,
+                        "template_id": "rejection",
+                    })
+                except Exception:
+                    pass
 
                 session.add(cand)
                 rejected_count += 1
@@ -580,6 +590,15 @@ class CVReviewService:
 
         pass_mark = getattr(opening, "pass_mark", 80) or 80
 
+        try:
+            agent_events.emit_sync(user_id, "ai_scanning", {
+                "candidate_id": str(cand.id),
+                "candidate_name": cand.name,
+                "opening_title": opening.title,
+            })
+        except Exception:
+            pass
+
         # Run AI screening
         eval_res = await screen_candidate_cv(
             job_title=opening.title,
@@ -604,6 +623,23 @@ class CVReviewService:
         ext["model_used"] = eval_res.get("model_used")
         ext["latency_seconds"] = eval_res.get("latency_seconds")
         cand.extracted_data = ext
+
+        try:
+            agent_events.emit_sync(user_id, "scored", {
+                "candidate_id": str(cand.id),
+                "candidate_name": cand.name,
+                "score": cand.score,
+                "recommendation": rec,
+                "summary": cand.summary,
+            })
+            agent_events.emit_sync(user_id, "status_changed", {
+                "candidate_id": str(cand.id),
+                "candidate_name": cand.name,
+                "status": "pending",
+                "stage": "applied",
+            })
+        except Exception:
+            pass
 
         session.add(cand)
         session.commit()

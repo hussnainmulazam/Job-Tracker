@@ -951,9 +951,17 @@ export const googleApi = {
     api.post<GooglePreviewEmailResponse>("/api/v1/integrations/google/preview-email", data),
   sendEmail: (data: GoogleSendEmailRequest) =>
     api.post<GoogleSendEmailResponse>("/api/v1/integrations/google/send-email", data),
-  listConversations: (filterStatus?: string) => {
-    const params = filterStatus && filterStatus !== "all" ? `?filter_status=${filterStatus}` : "";
-    return api.get<EmailConversationsResponse>(`/api/v1/integrations/google/conversations${params}`);
+  listConversations: (filterStatusOrParams?: string | { filterStatus?: string; skip?: number; limit?: number }) => {
+    const filterStatus = typeof filterStatusOrParams === "string" ? filterStatusOrParams : filterStatusOrParams?.filterStatus;
+    const skip = typeof filterStatusOrParams === "object" ? filterStatusOrParams.skip : undefined;
+    const limit = typeof filterStatusOrParams === "object" ? filterStatusOrParams.limit : undefined;
+
+    const query = new URLSearchParams();
+    if (filterStatus && filterStatus !== "all") query.set("filter_status", filterStatus);
+    if (skip !== undefined) query.set("skip", String(skip));
+    if (limit !== undefined) query.set("limit", String(limit));
+    const qs = query.toString() ? `?${query.toString()}` : "";
+    return api.get<EmailConversationsResponse>(`/api/v1/integrations/google/conversations${qs}`);
   },
   getThread: (candidateId: string) =>
     api.get<EmailThreadResponse>(`/api/v1/integrations/google/threads/${candidateId}`),

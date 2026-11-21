@@ -1,9 +1,13 @@
 """Google Integration Router — status, disconnection, Gmail background sync, email conversations & threads, and sending emails."""
+import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
+
+logger = logging.getLogger(__name__)
 
 from app.core.dependencies import CurrentUser
 from app.db import SessionDep
@@ -201,21 +205,20 @@ def list_conversations(
     current_user: CurrentUser,
     session: SessionDep,
     filter_status: Optional[str] = Query(default="all"),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
 ) -> EmailConversationsResponse:
-    """Lists email conversations grouped by candidate with unread counts and channel filtering."""
-    # Opportunistic background sync: if not synced recently, sync now
-    account = session.exec(
-        select(GoogleAccount).where(GoogleAccount.user_id == current_user.id)
-    ).first()
-    if account and account.access_token and account.last_sync_status != "token_revoked":
-        now_dt = datetime.now(timezone.utc)
-        if not account.last_synced_at or (now_dt - account.last_synced_at).total_seconds() > 20:
-            try:
-                service = GoogleService(session)
-                service.sync_gmail(current_user.id)
-            except Exception:
-                pass
+    """
+    Lists email conversations grouped by candidate with unread counts and channel filtering.
+    Optimized:
+    - No synchronous Gmail network sync (served purely from local DB).
+    - Single batch SQL query replaces N+1 candidate message queries.
+    - Slices to paginated window (skip/limit).
+    - Logs execution latency metrics.
+    """
+    t_start = time.perf_counter()
 
+    # 1. Fetch candidate list
     candidates = session.exec(
         select(Candidate)
         .where(Candidate.user_id == current_user.id)
@@ -227,16 +230,26 @@ def list_conversations(
         for op in session.exec(select(JobOpening).where(JobOpening.user_id == current_user.id)).all()
     }
 
+    # 2. Batch fetch messages in ONE single query (no N+1 loop)
+    cand_ids = [c.id for c in candidates]
+    msgs_by_candidate: dict[uuid.UUID, list[Message]] = {}
+    if cand_ids:
+        all_msgs = session.exec(
+            select(Message)
+            .where(Message.user_id == current_user.id, col(Message.candidate_id).in_(cand_ids))
+            .order_by(Message.created_at.desc())
+        ).all()
+        for m in all_msgs:
+            msgs_by_candidate.setdefault(m.candidate_id, []).append(m)
+
+    t_db = time.perf_counter() - t_start
+
     conversations = []
     awaiting_count = 0
     unread_total = 0
 
     for cand in candidates:
-        msgs = session.exec(
-            select(Message)
-            .where(Message.candidate_id == cand.id, Message.user_id == current_user.id)
-            .order_by(Message.created_at.desc())
-        ).all()
+        msgs = msgs_by_candidate.get(cand.id, [])
 
         last_msg = msgs[0] if msgs else None
         dir_val = (last_msg.direction.value if hasattr(last_msg.direction, "value") else str(last_msg.direction)).lower() if last_msg else "inbound"
@@ -307,9 +320,21 @@ def list_conversations(
         reverse=True,
     )
 
+    total_count = len(conversations)
+    paginated_convs = conversations[skip : skip + limit]
+
+    t_total = time.perf_counter() - t_start
+    logger.info(
+        "[TIMING] list_conversations: total_ms=%.2f db_ms=%.2f total_candidates=%d paginated=%d",
+        t_total * 1000,
+        t_db * 1000,
+        total_count,
+        len(paginated_convs),
+    )
+
     return EmailConversationsResponse(
-        conversations=conversations,
-        total_conversations=len(conversations),
+        conversations=paginated_convs,
+        total_conversations=total_count,
         awaiting_reply_count=awaiting_count,
         unread_count=unread_total,
     )
@@ -326,6 +351,7 @@ def get_thread(
     session: SessionDep,
 ) -> EmailThreadResponse:
     """Returns candidate details and full email communication thread history."""
+    t0 = time.perf_counter()
     cand = session.exec(
         select(Candidate).where(Candidate.id == candidate_id, Candidate.user_id == current_user.id)
     ).first()
@@ -397,6 +423,9 @@ def get_thread(
                 attachments=parsed_atts,
             )
         )
+
+    t_total = time.perf_counter() - t0
+    logger.info("[TIMING] get_thread: candidate_id=%s total_ms=%.2f msg_count=%d", candidate_id, t_total * 1000, len(msg_items))
 
     return EmailThreadResponse(
         candidate_id=cand.id,

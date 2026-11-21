@@ -7,14 +7,19 @@ strict email template dispatches, and action audit logs.
 """
 
 import uuid
+import asyncio
+import json
 from typing import Dict, Any, List, Optional
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.db import get_session
 from app.core.dependencies import get_current_user
+from app.core.security import decode_access_token
+from app.core.events import agent_events
 from app.models.user import User
 from app.models.candidate import Candidate
 from app.services.pipeline_agent_service import (
@@ -214,3 +219,70 @@ def get_candidate_history(
         "current_status": get_candidate_pipeline_status(candidate),
         "logs": ext.get("pipeline_logs", []),
     }
+
+
+def resolve_sse_user(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    session: Session = Depends(get_session),
+) -> User:
+    """Resolves authenticated user from either ?token= query param or Authorization header."""
+    raw_token = token
+    if not raw_token and authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.split("Bearer ", 1)[1].strip()
+    if not raw_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required for SSE stream")
+    try:
+        payload = decode_access_token(raw_token)
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        user = session.get(User, uuid.UUID(user_id_str))
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        return user
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+
+@router.get("/events", summary="Server-Sent Events (SSE) stream for real-time pipeline agent status")
+async def pipeline_agent_events_endpoint(
+    request: Request,
+    user: User = Depends(resolve_sse_user),
+):
+    """
+    Real-time Server-Sent Events (SSE) feed.
+    Emits events: cv_received, ai_scanning, scored, email_sent, interview_scheduled, status_changed.
+    Keeps connection alive via 15s ping heartbeats.
+    """
+    async def event_generator():
+        queue = agent_events.subscribe(user.id)
+        # Yield initial connection confirmation
+        init_data = json.dumps({
+            "event": "connected",
+            "payload": {"user_id": str(user.id)},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        yield f"data: {init_data}\n\n"
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event_data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                except asyncio.TimeoutError:
+                    # Heartbeat comment to keep HTTP connection alive
+                    yield ": ping\n\n"
+        finally:
+            agent_events.unsubscribe(user.id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -166,15 +166,25 @@ def dispatch_pipeline_template_email(
         )
         return False, f"Email '{template_id}' was already sent (idempotency skipped).", None
 
-    # 2. Render template
+    # 2. Render template from DB (single source of truth)
     try:
-        subject, html_body, text_body, preheader = render_template(template_id, context)
-    except MissingTemplateVariablesError as err:
-        logger.error("Missing template variables for %s: %s", template_id, err)
-        return False, str(err), None
-    except Exception as exc:
-        logger.exception("Error rendering template %s: %s", template_id, exc)
-        return False, str(exc), None
+        from app.services.template_service import render_user_template
+        subject, html_body, text_body, preheader = render_user_template(
+            session=session,
+            user_id=user_id,
+            template_id=template_id,
+            context=context,
+        )
+    except Exception as db_err:
+        logger.info("Falling back to registry template rendering for %s: %s", template_id, db_err)
+        try:
+            subject, html_body, text_body, preheader = render_template(template_id, context)
+        except MissingTemplateVariablesError as err:
+            logger.error("Missing template variables for %s: %s", template_id, err)
+            return False, str(err), None
+        except Exception as exc:
+            logger.exception("Error rendering template %s: %s", template_id, exc)
+            return False, str(exc), None
 
     # 3. Check time-of-day window (8:00 - 20:00) unless it's confirmation or reminder or forced
     urgent_templates = {

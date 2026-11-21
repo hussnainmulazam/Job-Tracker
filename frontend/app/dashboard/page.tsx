@@ -68,11 +68,15 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
+import { useAgentEvents } from "@/lib/use-agent-events";
 
 function ActionCenterContent() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const searchParams = useSearchParams();
+
+  // Listen to real-time Server-Sent Events from pipeline agent
+  useAgentEvents();
 
   // Active Queue tab: 'cv_review' | 'interview_results' | 'offer_approvals' | 'agent'
   const initialQueue = searchParams?.get("queue") || "cv_review";
@@ -211,12 +215,38 @@ function ActionCenterContent() {
 
   // ── Actions & Mutations ───────────────────────────────────────────────────
 
-  // CV Review Decision (Approve or Reject)
+  // CV Review Decision (Approve or Reject) with Optimistic UI
   const cvDecisionMutation = useMutation({
     mutationFn: ({ candidateId, action }: { candidateId: string; action: "approve" | "reject" }) =>
       cvReviewApi.decide({ candidate_ids: [candidateId], action }),
-    onMutate: ({ candidateId }) => {
+    onMutate: async ({ candidateId, action }) => {
       setDecisionPendingId(candidateId);
+      // Cancel outgoing queries so they don't overwrite optimistic update
+      await queryClient.cancelQueries({ queryKey: ["cvReviewQueue"] });
+      // Snapshot previous queue state
+      const queueKey = ["cvReviewQueue", selectedOpeningId, searchQuery];
+      const previousQueue = queryClient.getQueryData<CVReviewQueueItem[]>(queueKey);
+
+      // Optimistically remove candidate immediately from review queue
+      if (previousQueue) {
+        queryClient.setQueryData<CVReviewQueueItem[]>(
+          queueKey,
+          previousQueue.filter((item) => item.id !== candidateId)
+        );
+      }
+      return { previousQueue, queueKey };
+    },
+    onError: (err: any, vars, context) => {
+      setDecisionPendingId(null);
+      // Rollback to previous state on server error
+      if (context?.previousQueue && context?.queueKey) {
+        queryClient.setQueryData(context.queueKey, context.previousQueue);
+      }
+      toast({
+        title: "Decision Failed",
+        description: err?.message || "Could not record decision. Changes rolled back.",
+        variant: "destructive",
+      });
     },
     onSuccess: (res, vars) => {
       setDecisionPendingId(null);
@@ -224,39 +254,52 @@ function ActionCenterContent() {
         title: vars.action === "approve" ? "Candidate Approved!" : "Candidate Rejected",
         description: `Successfully processed ${vars.action}. ${res.approved_count} approved, ${res.rejected_count} rejected.`,
       });
+    },
+    onSettled: () => {
       refetchCvQueue();
       refetchStats();
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
     },
-    onError: (err: any) => {
-      setDecisionPendingId(null);
-      toast({
-        title: "Decision Failed",
-        description: err?.message || "Could not record decision. Please retry.",
-        variant: "destructive",
-      });
-    },
   });
 
-  // Bulk CV Decision
+  // Bulk CV Decision with Optimistic UI
   const bulkCvDecisionMutation = useMutation({
     mutationFn: ({ action }: { action: "approve" | "reject" }) =>
       cvReviewApi.decide({ candidate_ids: selectedReviewIds, action }),
+    onMutate: async ({ action }) => {
+      await queryClient.cancelQueries({ queryKey: ["cvReviewQueue"] });
+      const queueKey = ["cvReviewQueue", selectedOpeningId, searchQuery];
+      const previousQueue = queryClient.getQueryData<CVReviewQueueItem[]>(queueKey);
+
+      if (previousQueue) {
+        queryClient.setQueryData<CVReviewQueueItem[]>(
+          queueKey,
+          previousQueue.filter((item) => !selectedReviewIds.includes(item.id))
+        );
+      }
+      return { previousQueue, queueKey };
+    },
+    onError: (err: any, vars, context) => {
+      if (context?.previousQueue && context?.queueKey) {
+        queryClient.setQueryData(context.queueKey, context.previousQueue);
+      }
+      toast({
+        title: "Bulk Action Failed",
+        description: err?.message || "Failed to process bulk review. Changes rolled back.",
+        variant: "destructive",
+      });
+    },
     onSuccess: (res, vars) => {
       toast({
         title: `Bulk ${vars.action === "approve" ? "Approval" : "Rejection"} Completed`,
         description: `Successfully processed ${res.approved_count + res.rejected_count} candidate(s).`,
       });
       setSelectedReviewIds([]);
+    },
+    onSettled: () => {
       refetchCvQueue();
       refetchStats();
-    },
-    onError: (err: any) => {
-      toast({
-        title: "Bulk Action Failed",
-        description: err?.message || "Failed to process bulk review.",
-        variant: "destructive",
-      });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
     },
   });
 

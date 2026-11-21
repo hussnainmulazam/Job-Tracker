@@ -101,11 +101,11 @@ class Message(SQLModel, table=True):
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
-        sa_column=Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa_column=Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"), index=True),
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
-        sa_column=Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa_column=Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"), index=True),
     )
 
     # Relationships

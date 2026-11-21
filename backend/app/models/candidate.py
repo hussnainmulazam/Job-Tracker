@@ -154,10 +154,12 @@ class Candidate(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         nullable=False,
+        index=True,
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         nullable=False,
+        index=True,
     )
 
     # Relationships

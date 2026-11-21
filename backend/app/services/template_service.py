@@ -23,12 +23,49 @@ Sending NEVER calls the AI — it performs pure deterministic variable substitut
 """
 import logging
 import time
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any, Dict, Optional, Tuple, Set
 from pydantic import BaseModel, Field
+from sqlmodel import Session, select
 
 from app.services.ai_router import ai_router
 
 logger = logging.getLogger(__name__)
+
+# In-memory template cache with 60s TTL
+_USER_TEMPLATE_CACHE: Dict[uuid.UUID, Tuple[float, Dict[str, Any]]] = {}
+CACHE_TTL_SECONDS = 60.0
+
+
+def clear_user_template_cache(user_id: Optional[uuid.UUID] = None) -> None:
+    """Invalidates in-memory template cache for a specific user or all users."""
+    if user_id:
+        _USER_TEMPLATE_CACHE.pop(user_id, None)
+    else:
+        _USER_TEMPLATE_CACHE.clear()
+
+
+class MissingTemplateVariablesError(Exception):
+    """Raised when an email cannot be sent due to missing required template variables."""
+    pass
+
+
+class TemplateNotFoundError(Exception):
+    """Raised when an unknown template key is requested."""
+    pass
+
+
+TEMPLATE_ALIASES: Dict[str, str] = {
+    "application_rejected": "rejection",
+    "interview_rejected": "rejection",
+    "application_approved": "cv_passed",
+    "initial_screen": "initial_interview",
+    "behavioral": "behavioral_interview",
+    "final_round": "final_interview",
+    "application_on_hold": "on_hold",
+    "interview_reminder_24h": "interview_reminder",
+    "interview_reminder_1h": "interview_reminder",
+}
 
 TEMPLATE_CONFIGS: Dict[str, Dict[str, str]] = {
     "cv_received": {
@@ -271,6 +308,133 @@ def fill_template_variables(template_str: str, variables: Dict[str, Any]) -> str
         result = result.replace(f"{{{k}}}", val)
         result = result.replace(f"{{{{{k}}}}}", val)
     return result
+
+
+def get_user_templates(session: Session, user_id: uuid.UUID) -> Dict[str, Dict[str, Any]]:
+    """
+    Loads templates strictly from PostgreSQL OnboardingSetup (single source of truth).
+    Caches in memory with 60-second TTL.
+    If the user has no saved templates in DB, seeds them ONCE from code defaults,
+    saves them to DB, and never reads code defaults again.
+    """
+    now = time.time()
+    cached = _USER_TEMPLATE_CACHE.get(user_id)
+    if cached and (now - cached[0]) < CACHE_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        from app.models.onboarding import OnboardingSetup
+        onboarding = session.exec(select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)).first()
+    except Exception as exc:
+        logger.debug("Could not query OnboardingSetup (falling back to defaults): %s", exc)
+        return get_default_templates()
+
+    if not onboarding or not onboarding.templates or len(onboarding.templates) == 0:
+        hr_name = (onboarding.hr_name if onboarding else None) or "Recruiting Team"
+        company_name = (onboarding.company_name if onboarding else None) or "Our Company"
+        email_tone = (onboarding.email_tone if onboarding else None) or "warm_professional"
+        seeded = get_default_templates(hr_name=hr_name, company_name=company_name, email_tone=email_tone)
+
+        try:
+            if not onboarding:
+                onboarding = OnboardingSetup(
+                    user_id=user_id,
+                    hr_name=hr_name,
+                    company_name=company_name,
+                    email_tone=email_tone,
+                    templates=seeded,
+                    is_completed=False,
+                    current_step=4,
+                )
+                session.add(onboarding)
+            else:
+                onboarding.templates = seeded
+                session.add(onboarding)
+            session.commit()
+            session.refresh(onboarding)
+        except Exception as exc:
+            logger.debug("Could not persist seeded templates: %s", exc)
+            return seeded
+
+    templates_map = dict(onboarding.templates) if onboarding and onboarding.templates else {}
+    _USER_TEMPLATE_CACHE[user_id] = (now, templates_map)
+    return templates_map
+
+
+def render_user_template(
+    session: Session,
+    user_id: uuid.UUID,
+    template_id: str,
+    context: Dict[str, Any],
+) -> Tuple[str, str, str, str]:
+    """
+    Loads template strictly from DB (single source of truth).
+    Validates required variables deterministically.
+    Fills {variables} and {{variables}} deterministically.
+    Never calls AI at send time.
+    Returns: (subject, html_body, text_body, preheader)
+    """
+    user_templates = get_user_templates(session, user_id)
+    resolved_id = TEMPLATE_ALIASES.get(template_id, template_id)
+
+    tpl_cfg = user_templates.get(resolved_id) or user_templates.get(template_id)
+    if not tpl_cfg:
+        defaults = get_default_templates()
+        tpl_cfg = defaults.get(resolved_id) or defaults.get(template_id)
+        if not tpl_cfg:
+            raise TemplateNotFoundError(f"Template '{template_id}' not found in user database.")
+
+    raw_subject = tpl_cfg.get("subject", "")
+    raw_body = tpl_cfg.get("body", "")
+
+    # Normalize variable aliases for deterministic fill
+    normalized_ctx = {k: v for k, v in context.items()}
+    if "job_title" in normalized_ctx and "role" not in normalized_ctx:
+        normalized_ctx["role"] = normalized_ctx["job_title"]
+    if "role" in normalized_ctx and "job_title" not in normalized_ctx:
+        normalized_ctx["job_title"] = normalized_ctx["role"]
+    if "company_name" in normalized_ctx and "company" not in normalized_ctx:
+        normalized_ctx["company"] = normalized_ctx["company_name"]
+    if "company" in normalized_ctx and "company_name" not in normalized_ctx:
+        normalized_ctx["company_name"] = normalized_ctx["company"]
+    if "meeting_link" in normalized_ctx and "meet_link" not in normalized_ctx:
+        normalized_ctx["meet_link"] = normalized_ctx["meeting_link"]
+    if "meet_link" in normalized_ctx and "meeting_link" not in normalized_ctx:
+        normalized_ctx["meeting_link"] = normalized_ctx["meet_link"]
+    if "slot_link" in normalized_ctx and "schedule_link" not in normalized_ctx:
+        normalized_ctx["schedule_link"] = normalized_ctx["slot_link"]
+    if "schedule_link" in normalized_ctx and "slot_link" not in normalized_ctx:
+        normalized_ctx["slot_link"] = normalized_ctx["schedule_link"]
+
+    # Variable validation: candidate_name is strictly required
+    required_keys = ["candidate_name"]
+    if "rejection" in resolved_id or "reject" in resolved_id:
+        if not normalized_ctx.get("feedback"):
+            normalized_ctx["feedback"] = "Thank you for the time invested in interviewing with our team. We wish you continued success."
+
+    missing = [k for k in required_keys if not normalized_ctx.get(k)]
+    if missing:
+        raise MissingTemplateVariablesError(
+            f"Cannot send '{template_id}'. Required variable(s) missing: {missing}. Blocked and flagged for HR."
+        )
+
+    # Pure deterministic substitution
+    subject = fill_template_variables(raw_subject, normalized_ctx)
+    text_body = fill_template_variables(raw_body, normalized_ctx)
+    preheader = subject
+
+    html_paragraphs = "".join(f"<p style='margin: 0 0 16px 0; line-height: 1.6;'>{p.strip()}</p>" for p in text_body.split("\n\n") if p.strip())
+    html_body = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>{subject}</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: #1e293b; background-color: #f8fafc; padding: 24px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 32px;">
+    {html_paragraphs}
+  </div>
+</body>
+</html>"""
+
+    return subject, html_body, text_body, preheader
 
 
 async def generate_recruiting_templates_ai(

@@ -150,6 +150,28 @@ def set_candidate_pipeline_status(
     session.refresh(candidate)
 
     logger.info("PIPELINE ACTION LOG: %s", log_entry)
+
+    # Emit real-time agent workflow events via SSE broadcaster
+    try:
+        from app.core.events import agent_events
+        agent_events.emit_sync(candidate.user_id, "status_changed", {
+            "candidate_id": str(candidate.id),
+            "candidate_name": candidate.name,
+            "status": new_status,
+            "stage": candidate.stage.value if hasattr(candidate.stage, "value") else str(candidate.stage),
+            "action": action_taken,
+            "template_sent": template_sent,
+        })
+        if template_sent:
+            agent_events.emit_sync(candidate.user_id, "email_sent", {
+                "candidate_id": str(candidate.id),
+                "candidate_name": candidate.name,
+                "template_id": template_sent,
+                "result": result,
+            })
+    except Exception as ev_err:
+        logger.debug("Non-fatal SSE emit error in record_pipeline_transition: %s", ev_err)
+
     return log_entry
 
 
@@ -342,6 +364,17 @@ class HiringPipelineAgent:
         self.session.commit()
         self.session.refresh(candidate)
 
+        try:
+            from app.core.events import agent_events
+            agent_events.emit_sync(self.user_id, "cv_received", {
+                "candidate_id": str(candidate.id),
+                "candidate_name": candidate.name,
+                "candidate_email": candidate.email,
+                "job_title": job_title,
+            })
+        except Exception:
+            pass
+
         set_candidate_pipeline_status(
             self.session,
             candidate,
@@ -374,6 +407,15 @@ class HiringPipelineAgent:
         if not candidate:
             raise ValueError(f"Candidate {candidate_id} not found.")
 
+        try:
+            from app.core.events import agent_events
+            agent_events.emit_sync(self.user_id, "ai_scanning", {
+                "candidate_id": str(candidate.id),
+                "candidate_name": candidate.name,
+            })
+        except Exception:
+            pass
+
         # Compute AI screening score
         job_opening = self.session.exec(
             select(JobOpening).where(JobOpening.id == candidate.opening_id)
@@ -397,6 +439,17 @@ class HiringPipelineAgent:
             f"Solid foundational engineering background aligned with {job_opening.title if job_opening else 'role'}. "
             f"Ready for HR Review."
         )
+
+        try:
+            from app.core.events import agent_events
+            agent_events.emit_sync(self.user_id, "scored", {
+                "candidate_id": str(candidate.id),
+                "candidate_name": candidate.name,
+                "score": score,
+                "summary": candidate.summary,
+            })
+        except Exception:
+            pass
 
         # Set status AI_SCANNED, then HR_REVIEW
         set_candidate_pipeline_status(
@@ -619,6 +672,19 @@ class HiringPipelineAgent:
             dispatch_pipeline_template_email(
                 self.session, self.user_id, candidate, "interview_confirmed", ctx_confirmed, event_key=f"{round_name}_confirmed"
             )
+
+            try:
+                from app.core.events import agent_events
+                agent_events.emit_sync(self.user_id, "interview_scheduled", {
+                    "candidate_id": str(candidate.id),
+                    "candidate_name": candidate.name,
+                    "round": round_name,
+                    "date": date_str,
+                    "time": time_str,
+                    "meet_link": meet_link,
+                })
+            except Exception:
+                pass
 
             # Send hr_interview_scheduled to HR
             dispatch_pipeline_template_email(

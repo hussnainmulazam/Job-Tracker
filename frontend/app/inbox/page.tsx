@@ -48,6 +48,7 @@ import {
 } from "@/lib/api";
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
 import { ScheduleInviteModal } from "@/components/scheduling/schedule-invite-modal";
+import { useAgentEvents } from "@/lib/use-agent-events";
 
 type FilterTab = "all" | "unread" | "awaiting_reply";
 
@@ -104,6 +105,9 @@ function InboxContent() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  // Listen to real-time agent workflow events via SSE
+  useAgentEvents();
+
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(initialCandidateId);
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -113,10 +117,12 @@ function InboxContent() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [candidateDrawerOpen, setCandidateDrawerOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const pageSize = 25;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. Fetch conversations list
+  // 1. Fetch conversations list with pagination (skip/limit)
   const {
     data: conversationsData,
     isLoading: isLoadingConvs,
@@ -125,9 +131,14 @@ function InboxContent() {
     error: errorConvs,
     refetch: refetchConvs,
   } = useQuery({
-    queryKey: ["email-conversations", filterTab],
-    queryFn: () => googleApi.listConversations(filterTab),
-    refetchInterval: 10000,
+    queryKey: ["email-conversations", filterTab, page],
+    queryFn: () =>
+      googleApi.listConversations({
+        filterStatus: filterTab,
+        skip: page * pageSize,
+        limit: pageSize,
+      }),
+    refetchInterval: 30000,
     retry: 1,
   });
 
@@ -160,7 +171,7 @@ function InboxContent() {
     queryKey: ["email-thread", selectedCandidateId],
     queryFn: () => (selectedCandidateId ? googleApi.getThread(selectedCandidateId) : Promise.reject("No candidate")),
     enabled: !!selectedCandidateId,
-    refetchInterval: 6000,
+    refetchInterval: 20000,
     retry: 1,
   });
 
@@ -485,6 +496,31 @@ function InboxContent() {
               })
             )}
           </div>
+
+          {/* Conversation List Pagination */}
+          {conversationsData && conversationsData.total_conversations > pageSize && (
+            <div className="p-2.5 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground bg-muted/20 shrink-0">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="px-2.5 py-1 rounded border border-border/60 text-xs font-medium disabled:opacity-40 hover:bg-muted transition-colors cursor-pointer"
+              >
+                Previous
+              </button>
+              <span className="text-[11px]">
+                {page * pageSize + 1}-
+                {Math.min((page + 1) * pageSize, conversationsData.total_conversations)} of{" "}
+                {conversationsData.total_conversations}
+              </span>
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={(page + 1) * pageSize >= conversationsData.total_conversations}
+                className="px-2.5 py-1 rounded border border-border/60 text-xs font-medium disabled:opacity-40 hover:bg-muted transition-colors cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Right Pane: Active Thread History & Reply Composer ───── */}
