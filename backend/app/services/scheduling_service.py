@@ -50,6 +50,7 @@ from app.schemas.scheduling import (
     WorkingBlock,
 )
 from app.services.audit_log_service import audit_log_service
+from app.services.calendar_cache import calendar_cache
 from app.services.google_service import GoogleService
 from app.services.template_service import fill_template_variables, get_default_templates, render_user_template
 from app.core.events import agent_events
@@ -852,6 +853,9 @@ class SchedulingService:
                 detail="This time slot conflicts with an existing interview. Please choose another slot.",
             )
 
+        # ── Clear Calendar Events Cache for User ──────────────────────────────
+        calendar_cache.clear_for_user(str(link.user_id))
+
         # ── Send Confirmation via WhatsApp template/email ─────────────────────
         await self._send_interview_notification(
             session=session,
@@ -961,6 +965,9 @@ class SchedulingService:
                 detail="Exclusion constraint: This slot was booked simultaneously.",
             )
 
+        # Clear Calendar Events Cache for User
+        calendar_cache.clear_for_user(str(interview.user_id))
+
         candidate = session.exec(select(Candidate).where(Candidate.id == interview.candidate_id)).first()
         opening = session.exec(select(JobOpening).where(JobOpening.id == interview.opening_id)).first()
 
@@ -1027,6 +1034,9 @@ class SchedulingService:
         session.add(interview)
         session.commit()
         session.refresh(interview)
+
+        # Clear Calendar Events Cache for User
+        calendar_cache.clear_for_user(str(interview.user_id))
 
         candidate = session.exec(select(Candidate).where(Candidate.id == interview.candidate_id)).first()
         opening = session.exec(select(JobOpening).where(JobOpening.id == interview.opening_id)).first()
@@ -1704,6 +1714,8 @@ class SchedulingService:
         ).first()
         if not interview:
             raise HTTPException(status_code=404, detail="Interview not found.")
+
+        calendar_cache.clear_for_user(str(user_id))
 
         candidate = session.exec(
             select(Candidate).where(Candidate.id == interview.candidate_id)

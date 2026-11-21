@@ -21,6 +21,7 @@ from app.schemas.agent_settings import (
     DailySummarySendResponse,
 )
 from app.services.agent_settings_service import agent_settings_service
+from app.services.cache_service import cache_service
 
 router = APIRouter(prefix="/agent", tags=["Autonomous Agent Settings & Controls"])
 
@@ -35,8 +36,15 @@ def get_agent_settings(
     session: SessionDep,
 ) -> AgentSettingsRead:
     """Retrieve recruiter's agent settings including pause status and daily send quota."""
+    cache_key = f"user:settings:{current_user.id}"
+    cached = cache_service.get(cache_key)
+    if cached is not None:
+        return AgentSettingsRead.model_validate(cached)
+
     settings_obj = agent_settings_service.get_or_create_settings(session, current_user.id)
-    return agent_settings_service.to_read(session, settings_obj)
+    res = agent_settings_service.to_read(session, settings_obj)
+    cache_service.set(cache_key, res.model_dump(), ttl=120)
+    return res
 
 
 @router.put(
@@ -50,7 +58,9 @@ def update_agent_settings(
     session: SessionDep,
 ) -> AgentSettingsRead:
     """Configures daily send limits, notification recipient, alert toggles, and daily summary schedule."""
-    return agent_settings_service.update_settings(session, current_user.id, payload)
+    updated = agent_settings_service.update_settings(session, current_user.id, payload)
+    cache_service.delete(f"user:settings:{current_user.id}")
+    return updated
 
 
 @router.post(
@@ -67,12 +77,14 @@ def toggle_agent_pause(
     Toggles or sets the agent pause state.
     When paused, autonomous message dispatches and intake actions are halted.
     """
-    return agent_settings_service.toggle_pause(
+    result = agent_settings_service.toggle_pause(
         session=session,
         user_id=current_user.id,
         paused=payload.paused,
         reason=payload.reason,
     )
+    cache_service.delete(f"user:settings:{current_user.id}")
+    return result
 
 
 @router.get(

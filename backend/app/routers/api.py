@@ -7,6 +7,7 @@ from app.routers import (
     ai,
     auth,
     auth_google,
+    calendar,
     candidates,
     cv_review,
     dashboard,
@@ -25,6 +26,7 @@ api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(auth_google.router)
+api_router.include_router(calendar.router)
 api_router.include_router(integrations_google.router)
 api_router.include_router(outreach.router)
 api_router.include_router(scheduling.router)

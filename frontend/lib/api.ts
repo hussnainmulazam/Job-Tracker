@@ -935,7 +935,34 @@ export interface GoogleSendEmailResponse {
 }
 
 export const googleApi = {
-  getLoginUrl: () => api.get<GoogleAuthUrlResponse>("/api/v1/auth/google/login"),
+  getLoginUrl: async () => {
+    // 1. Try Next.js same-origin route handler first to prevent browser CORS/port issues
+    try {
+      const activeToken = getAuthToken();
+      const headers: Record<string, string> = {};
+      if (activeToken) {
+        headers["Authorization"] = `Bearer ${activeToken}`;
+      }
+      const res = await fetch("/api/auth/google/workspace-url", {
+        headers,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.auth_url) return data;
+      } else {
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.detail) {
+          throw new Error(errJson.detail);
+        }
+      }
+    } catch (routeErr: any) {
+      if (routeErr?.message && !routeErr.message.includes("Failed to fetch")) {
+        throw routeErr;
+      }
+      // Fallback to direct client fetch
+    }
+    return api.get<GoogleAuthUrlResponse>("/api/v1/auth/google/login");
+  },
   getStatus: () => api.get<GoogleAccountStatus>("/api/v1/integrations/google/status"),
   disconnect: () => api.post<{ detail: string }>("/api/v1/integrations/google/disconnect"),
   syncGmail: (params?: { query?: string; label?: string }) => {
@@ -1247,6 +1274,68 @@ export const schedulingApi = {
 
   getBookingLink: () =>
     api.get<SchedulingLinkRead>("/api/v1/scheduling/booking-link"),
+};
+
+// ── Google Calendar Live Integration ──────────────────────────────────────────
+
+export interface CalendarAttendee {
+  email?: string;
+  name?: string;
+  response_status?: string;
+}
+
+export interface CalendarInterviewData {
+  interview_id: string;
+  candidate_id: string;
+  candidate_name: string;
+  candidate_email: string;
+  candidate_phone?: string | null;
+  opening_id?: string | null;
+  opening_title?: string | null;
+  round: string;
+  status: string;
+  result_status?: string | null;
+  feedback?: string | null;
+  meet_link?: string | null;
+}
+
+export interface CalendarEventItem {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  all_day: boolean;
+  attendees: CalendarAttendee[];
+  meet_link?: string | null;
+  status: string;
+  color: string;
+  is_interview: boolean;
+  interview_data?: CalendarInterviewData | null;
+}
+
+export interface BusinessHourPeriod {
+  days_of_week: number[];
+  start_time: string;
+  end_time: string;
+}
+
+export interface CalendarEventsResponse {
+  connected: boolean;
+  reconnect_required: boolean;
+  message?: string | null;
+  time_zone: string;
+  business_hours: BusinessHourPeriod[];
+  events: CalendarEventItem[];
+}
+
+export const calendarApi = {
+  getEvents: (params?: { start?: string; end?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.start) q.set("start", params.start);
+    if (params?.end) q.set("end", params.end);
+    const qs = q.toString();
+    return api.get<CalendarEventsResponse>(`/api/v1/calendar/events${qs ? `?${qs}` : ""}`);
+  },
 };
 
 export interface CalendarBusyEvent {

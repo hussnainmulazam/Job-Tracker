@@ -139,8 +139,12 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     SUPABASE_STORAGE_BUCKET: str = "resumes"
 
-    # ── Pinecone Vector Database & Fast Semantic Caching ─────────────────────
+    # ── Redis L2 Cache (Optional) ────────────────────────────────────────────
+    REDIS_URL: Optional[str] = None
+
+    # ── Pinecone Vector Service (Optional — Semantic CV Match & Similarity) ──
     PINECONE_API_KEY: Optional[str] = None
+    PINECONE_INDEX: Optional[str] = None
     PINECONE_INDEX_NAME: str = "job-tracker-cache"
     PINECONE_HOST: Optional[str] = None
     PINECONE_EMBED_MODEL: str = "multilingual-e5-large"

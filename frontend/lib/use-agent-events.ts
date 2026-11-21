@@ -62,8 +62,15 @@ export function useAgentEvents(options?: {
           } else if (data.event === "email_sent") {
             queryClient.invalidateQueries({ queryKey: ["email-conversations"] });
             queryClient.invalidateQueries({ queryKey: ["thread"] });
-          } else if (data.event === "interview_scheduled") {
+          } else if (
+            data.event === "interview_scheduled" ||
+            data.event === "interview_rescheduled" ||
+            data.event === "interview_cancelled" ||
+            data.event === "calendar_updated"
+          ) {
+            queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
             queryClient.invalidateQueries({ queryKey: ["interviews-all"] });
+            queryClient.invalidateQueries({ queryKey: ["interviewsList"] });
             queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
           }
         } catch {

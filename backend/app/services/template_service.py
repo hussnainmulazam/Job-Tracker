@@ -29,20 +29,20 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.services.ai_router import ai_router
+from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
-# In-memory template cache with 60s TTL
-_USER_TEMPLATE_CACHE: Dict[uuid.UUID, Tuple[float, Dict[str, Any]]] = {}
-CACHE_TTL_SECONDS = 60.0
+# Cache TTL for templates: 300s (5 minutes)
+TEMPLATE_CACHE_TTL = 300
 
 
 def clear_user_template_cache(user_id: Optional[uuid.UUID] = None) -> None:
-    """Invalidates in-memory template cache for a specific user or all users."""
+    """Invalidates dual-layer template cache for a specific user or all users."""
     if user_id:
-        _USER_TEMPLATE_CACHE.pop(user_id, None)
+        cache_service.delete(f"templates:user:{user_id}")
     else:
-        _USER_TEMPLATE_CACHE.clear()
+        cache_service.delete_prefix("templates:user:")
 
 
 class MissingTemplateVariablesError(Exception):
@@ -317,10 +317,10 @@ def get_user_templates(session: Session, user_id: uuid.UUID) -> Dict[str, Dict[s
     If the user has no saved templates in DB, seeds them ONCE from code defaults,
     saves them to DB, and never reads code defaults again.
     """
-    now = time.time()
-    cached = _USER_TEMPLATE_CACHE.get(user_id)
-    if cached and (now - cached[0]) < CACHE_TTL_SECONDS:
-        return cached[1]
+    cache_key = f"templates:user:{user_id}"
+    cached = cache_service.get(cache_key)
+    if cached is not None and isinstance(cached, dict):
+        return cached
 
     try:
         from app.models.onboarding import OnboardingSetup
@@ -357,7 +357,7 @@ def get_user_templates(session: Session, user_id: uuid.UUID) -> Dict[str, Dict[s
             return seeded
 
     templates_map = dict(onboarding.templates) if onboarding and onboarding.templates else {}
-    _USER_TEMPLATE_CACHE[user_id] = (now, templates_map)
+    cache_service.set(cache_key, templates_map, ttl=TEMPLATE_CACHE_TTL)
     return templates_map
 
 

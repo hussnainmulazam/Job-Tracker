@@ -13,6 +13,7 @@ from app.routers import (
     ai,
     api_router,
     auth_google,
+    calendar,
     health_router,
     integrations_google,
 )
@@ -163,6 +164,7 @@ app.include_router(ai.router)
 
 # Direct root-level endpoints for Google OAuth2 and integrations as requested
 app.include_router(auth_google.router)
+app.include_router(calendar.router)
 app.include_router(integrations_google.router)
 from app.routers import job_openings
 app.include_router(job_openings.router)

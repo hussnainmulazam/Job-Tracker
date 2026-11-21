@@ -30,13 +30,18 @@ router = APIRouter(tags=["Google Workspace OAuth2"])
 def google_login(
     current_user: CurrentUser,
     session: SessionDep,
-) -> GoogleAuthUrlResponse:
+    redirect: bool = Query(default=False),
+):
     """
     Initiates Google Workspace OAuth2 authorization code flow with offline access (refresh token).
     Encodes current authenticated recruiter user_id in signed state parameter with flow="workspace".
+    If redirect=true is specified, issues a direct 302 browser redirect to Google consent screen.
     """
     service = GoogleService(session)
-    return service.generate_auth_url(current_user.id)
+    res = service.generate_auth_url(current_user.id)
+    if redirect:
+        return RedirectResponse(url=res.auth_url, status_code=status.HTTP_302_FOUND)
+    return res
 
 
 @router.get(

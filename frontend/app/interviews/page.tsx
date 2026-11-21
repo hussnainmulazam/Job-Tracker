@@ -54,6 +54,8 @@ import { RescheduleCancelModal } from "@/components/scheduling/reschedule-cancel
 import { InterviewResultModal } from "@/components/scheduling/interview-result-modal";
 import { OfferLetterModal } from "@/components/scheduling/offer-letter-modal";
 import { CandidateDrawer } from "@/components/candidates/candidate-drawer";
+import { GoogleCalendarView } from "@/components/scheduling/google-calendar-view";
+import { useAgentEvents } from "@/lib/use-agent-events";
 
 type ViewTab = "upcoming" | "calendar" | "past";
 type CalendarMode = "week" | "month";
@@ -91,6 +93,9 @@ export default function InterviewsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [mainTab, setMainTab] = useState<string>("sessions");
+
+  // Subscribe to realtime agent & interview updates
+  useAgentEvents();
 
   // 1. Filter and View States
   const [activeTab, setActiveTab] = useState<ViewTab>("upcoming");
@@ -898,267 +903,23 @@ export default function InterviewsPage() {
             </div>
           </div>
         ) : activeTab === "calendar" ? (
-          /* ── 2. CALENDAR (WEEK / MONTH) VIEW ─────────────────────────── */
-          <div className="space-y-4">
-            {/* Calendar Controls: Navigation and Mode Switcher */}
-            <div className="flex items-center justify-between bg-card p-3 rounded-2xl border border-border/70 dark:border-white/[0.08] shadow-xs">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePrevCalendar}
-                  className="h-8 w-8 p-0 rounded-lg"
-                  title="Previous"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleTodayCalendar}
-                  className="h-8 text-xs font-semibold px-2.5 rounded-lg"
-                >
-                  Today
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNextCalendar}
-                  className="h-8 w-8 p-0 rounded-lg"
-                  title="Next"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-
-                <h3 className="text-xs sm:text-sm font-bold text-foreground ml-2">
-                  {calendarRangeLabel}
-                </h3>
-              </div>
-
-              {/* Week vs Month Switcher */}
-              <div className="flex bg-muted/60 p-0.5 rounded-lg border border-border/70">
-                <button
-                  onClick={() => setCalendarMode("week")}
-                  className={`px-2.5 py-1 rounded text-xs font-semibold transition ${
-                    calendarMode === "week"
-                      ? "bg-background text-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Week
-                </button>
-                <button
-                  onClick={() => setCalendarMode("month")}
-                  className={`px-2.5 py-1 rounded text-xs font-semibold transition ${
-                    calendarMode === "month"
-                      ? "bg-background text-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Month
-                </button>
-              </div>
-            </div>
-
-            {/* Week View Grid */}
-            {calendarMode === "week" ? (
-              <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-                {Array.from({ length: 7 }).map((_, idx) => {
-                  const startWeek = getStartOfWeek(currentCalendarDate);
-                  const dayDate = addDays(startWeek, idx);
-                  const isToday = isTodayDate(dayDate);
-
-                  const dayInterviews = searchFilteredInterviews.filter((inv) =>
-                    isSameDate(new Date(inv.start_time), dayDate)
-                  );
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`rounded-2xl border flex flex-col min-h-[360px] p-2.5 space-y-2 transition-all ${
-                        isToday
-                          ? "bg-emerald-500/[0.02] border-emerald-500/40 ring-1 ring-emerald-500/20"
-                          : "bg-card border-border/70"
-                      }`}
-                    >
-                      {/* Day Column Header */}
-                      <div className="flex items-center justify-between pb-2 border-b border-border/60">
-                        <div>
-                          <p className="text-[10px] uppercase font-bold text-muted-foreground">
-                            {dayDate.toLocaleDateString("en-US", { weekday: "short" })}
-                          </p>
-                          <p className={`text-xs font-bold ${isToday ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
-                            {dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                          </p>
-                        </div>
-                        {isToday ? (
-                          <Badge className="text-[9px] px-1 py-0 h-4 bg-emerald-600 text-white font-bold">
-                            Today
-                          </Badge>
-                        ) : dayInterviews.length > 0 ? (
-                          <span className="text-[10px] font-mono px-1.5 rounded-full bg-muted text-muted-foreground font-semibold">
-                            {dayInterviews.length}
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {/* Day Events */}
-                      <div className="space-y-2 flex-1 overflow-y-auto">
-                        {dayInterviews.length === 0 ? (
-                          <div className="h-full flex items-center justify-center text-center text-[10.5px] text-muted-foreground/40 italic py-8">
-                            No sessions
-                          </div>
-                        ) : (
-                          dayInterviews.map((inv) => {
-                            const start = new Date(inv.start_time);
-                            const end = new Date(inv.end_time);
-                            const timeStr = start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-                            return (
-                              <div
-                                key={inv.id}
-                                className="p-2 rounded-xl border border-border/80 bg-background hover:border-primary/50 transition-all space-y-1.5 shadow-xs"
-                              >
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[10px] font-mono font-bold text-foreground">
-                                    {timeStr}
-                                  </span>
-                                  {renderStatusBadge(inv.status)}
-                                </div>
-                                <p className="text-xs font-bold text-foreground truncate">
-                                  {inv.candidate_name}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground truncate">
-                                  {inv.opening_title}
-                                </p>
-                                <div className="pt-1 flex items-center justify-between gap-1">
-                                  {inv.meet_link && inv.status !== "cancelled" ? (
-                                    <a
-                                      href={inv.meet_link}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-medium hover:bg-emerald-500"
-                                    >
-                                      <Video className="w-2.5 h-2.5" />
-                                      <span>Join</span>
-                                    </a>
-                                  ) : (
-                                    <div />
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleOpenScorecard(inv.candidate_id)}
-                                    className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground"
-                                  >
-                                    Scorecard
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              /* Month View Grid */
-              <div className="bg-card rounded-2xl border border-border/70 overflow-hidden shadow-xs">
-                {/* Weekday headers */}
-                <div className="grid grid-cols-7 border-b border-border/70 bg-muted/40 text-center py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                  <span>Mon</span>
-                  <span>Tue</span>
-                  <span>Wed</span>
-                  <span>Thu</span>
-                  <span>Fri</span>
-                  <span>Sat</span>
-                  <span>Sun</span>
-                </div>
-
-                {/* Month Grid Cells */}
-                <div className="grid grid-cols-7 divide-x divide-y divide-border/60">
-                  {(() => {
-                    const year = currentCalendarDate.getFullYear();
-                    const month = currentCalendarDate.getMonth();
-                    const firstDayOfMonth = new Date(year, month, 1);
-                    const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-                    // Adjust so Monday is 0, Sunday is 6
-                    const startDay = (firstDayOfMonth.getDay() + 6) % 7;
-                    const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
-
-                    return Array.from({ length: totalCells }).map((_, cellIdx) => {
-                      const dayNumber = cellIdx - startDay + 1;
-                      const isCurrentMonth = dayNumber > 0 && dayNumber <= daysInMonth;
-                      const cellDate = new Date(year, month, dayNumber);
-                      const isToday = isCurrentMonth && isTodayDate(cellDate);
-
-                      const cellInterviews = isCurrentMonth
-                        ? searchFilteredInterviews.filter((inv) =>
-                            isSameDate(new Date(inv.start_time), cellDate)
-                          )
-                        : [];
-
-                      return (
-                        <div
-                          key={cellIdx}
-                          className={`min-h-[95px] p-1.5 flex flex-col justify-between transition-colors ${
-                            !isCurrentMonth
-                              ? "bg-muted/10 opacity-30 cursor-not-allowed"
-                              : isToday
-                              ? "bg-emerald-500/[0.03]"
-                              : "hover:bg-muted/30"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span
-                              className={`text-[11px] font-bold rounded-full w-5 h-5 flex items-center justify-center ${
-                                isToday
-                                  ? "bg-emerald-600 text-white"
-                                  : isCurrentMonth
-                                  ? "text-foreground"
-                                  : "text-muted-foreground"
-                              }`}
-                            >
-                              {isCurrentMonth ? dayNumber : ""}
-                            </span>
-                            {cellInterviews.length > 0 && (
-                              <span className="text-[9.5px] font-mono px-1 py-0.2 rounded-full bg-primary/10 text-primary font-bold">
-                                {cellInterviews.length}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-1 overflow-y-auto max-h-[64px]">
-                            {cellInterviews.slice(0, 2).map((inv) => (
-                              <button
-                                key={inv.id}
-                                onClick={() => {
-                                  setActionInterview(inv);
-                                  setActionModalMode("reschedule");
-                                }}
-                                className="w-full text-left px-1.5 py-0.5 rounded text-[10px] truncate bg-primary/[0.06] hover:bg-primary/[0.12] border border-primary/20 text-foreground flex items-center gap-1"
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                                <span className="truncate">{inv.candidate_name}</span>
-                              </button>
-                            ))}
-                            {cellInterviews.length > 2 && (
-                              <span className="text-[9.5px] text-muted-foreground font-semibold px-1">
-                                +{cellInterviews.length - 2} more
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-            )}
-          </div>
+          /* ── 2. GOOGLE CALENDAR VIEW (FullCalendar) ───────────────────── */
+          <GoogleCalendarView
+            onReschedule={(inv) => {
+              setActionInterview(inv);
+              setActionModalMode("reschedule");
+            }}
+            onCancel={(inv) => {
+              setActionInterview(inv);
+              setActionModalMode("cancel");
+            }}
+            onRecordResult={(inv) => {
+              setResultModalInterview(inv);
+            }}
+            onOpenScorecard={(candidateId) => {
+              handleOpenScorecard(candidateId);
+            }}
+          />
         ) : (
           /* ── 3. PAST LIST VIEW ────────────────────────────────────────── */
           <div className="space-y-3">

@@ -59,3 +59,15 @@ def health_db_check(session: SessionDep):
         )
 
 
+@router.get("/health/cache", summary="Cache health and metrics")
+@router.get("/cache", summary="Cache health and metrics (alias)")
+def health_cache_check():
+    """
+    Returns caching performance metrics and layer statuses.
+    Counts only (hits, misses, hit_ratio, l1_keys_count, l2_enabled, l2_connected) - NO private data.
+    """
+    from app.services.cache_service import cache_service
+    return cache_service.get_stats()
+
+
+

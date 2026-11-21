@@ -125,8 +125,18 @@ def me(current_user: CurrentUser) -> UserPublic:
 
     Requires a valid `Authorization: Bearer <token>` header.
     Returns HTTP 401 if the token is missing, expired, or invalid.
+    Cached via L1/L2 cache (user:profile:{user_id}) for fast reads.
     """
-    return UserPublic.model_validate(current_user)
+    from app.services.cache_service import cache_service
+
+    cache_key = f"user:profile:{current_user.id}"
+    cached = cache_service.get(cache_key)
+    if cached is not None:
+        return UserPublic.model_validate(cached)
+
+    result = UserPublic.model_validate(current_user)
+    cache_service.set(cache_key, result.model_dump(), ttl=180)
+    return result
 
 
 # ── Google OAuth Login / Signup ──────────────────────────────────────────────

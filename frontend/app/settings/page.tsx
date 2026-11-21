@@ -397,7 +397,7 @@ function SettingsPageInner() {
         });
       }
       refetchGoogleStatus();
-      const cleanUrl = window.location.pathname;
+      const cleanUrl = window.location.pathname + "?tab=google";
       window.history.replaceState({}, document.title, cleanUrl);
     } else if (errorParam) {
       toast({
@@ -405,7 +405,7 @@ function SettingsPageInner() {
         description: decodeURIComponent(errorParam),
         variant: "destructive",
       });
-      const cleanUrl = window.location.pathname;
+      const cleanUrl = window.location.pathname + "?tab=google";
       window.history.replaceState({}, document.title, cleanUrl);
     }
   }, [toast, refetchGoogleStatus]);
@@ -417,9 +417,12 @@ function SettingsPageInner() {
       if (data?.auth_url) window.location.href = data.auth_url;
     },
     onError: (err: any) => {
+      const isNetworkErr = err?.message === "Failed to fetch" || err?.message?.includes("fetch");
       toast({
         title: "OAuth Initialization Failed",
-        description: err.message || "Failed to initialize Google authorization flow.",
+        description: isNetworkErr
+          ? "Unable to reach backend server. Please verify that the FastAPI backend is running on http://localhost:8000."
+          : (err.message || "Failed to initialize Google authorization flow."),
         variant: "destructive",
       });
     },
