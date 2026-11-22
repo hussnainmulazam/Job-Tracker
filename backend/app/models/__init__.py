@@ -15,6 +15,7 @@ from app.models.job_opening import JobOpening, JobOpeningStatus
 from app.models.message import Message, MessageDirection, MessageStatus, MessageType
 from app.models.notification import Notification
 from app.models.onboarding import OnboardingSetup
+from app.models.recruiting_template import RecruitingTemplate
 from app.models.user import User
 
 __all__ = [
@@ -39,4 +40,5 @@ __all__ = [
     "Notification",
     "OnboardingSetup",
     "AgentSettings",
+    "RecruitingTemplate",
 ]

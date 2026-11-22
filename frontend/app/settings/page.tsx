@@ -41,6 +41,9 @@ import {
   Sparkles,
   Eye,
   Edit3,
+  Plus,
+  Trash2,
+  Star,
 } from "lucide-react";
 
 import {
@@ -57,6 +60,8 @@ import {
   GmailSyncResponse,
   AuditLog,
   removeAuthToken,
+  recruitingTemplatesApi,
+  RecruitingTemplateModel,
 } from "@/lib/api";
 import {
   LIFECYCLE_TEMPLATES,
@@ -240,40 +245,98 @@ function SettingsPageInner() {
     retry: false,
   });
 
+  // Query DB templates (Single Source of Truth)
+  const {
+    data: dbTemplatesList,
+    refetch: refetchDbTemplates,
+    isLoading: isLoadingTemplates,
+  } = useQuery({
+    queryKey: ["recruiting-templates"],
+    queryFn: () => recruitingTemplatesApi.list(),
+  });
+
   const [activeSettingsTemplate, setActiveSettingsTemplate] = useState("cv_received");
-  const [settingsTemplates, setSettingsTemplates] = useState<Record<string, { subject: string; body: string; name?: string }>>(
-    DEFAULT_LIFECYCLE_TEMPLATES
-  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [settingsTemplates, setSettingsTemplates] = useState<
+    Record<string, { id?: string; subject: string; body: string; name?: string; is_active?: boolean; is_default?: boolean; is_custom?: boolean; stage_key?: string }>
+  >(DEFAULT_LIFECYCLE_TEMPLATES as any);
   const [settingsPreviewMode, setSettingsPreviewMode] = useState(false);
   const [isGeneratingAllSettingsAI, setIsGeneratingAllSettingsAI] = useState(false);
   const [regeneratingSettingsKey, setRegeneratingSettingsKey] = useState<string | null>(null);
 
+  const [isAddingCustom, setIsAddingCustom] = useState(false);
+  const [newCustomStage, setNewCustomStage] = useState("custom_stage");
+  const [newCustomName, setNewCustomName] = useState("");
+  const [newCustomSubject, setNewCustomSubject] = useState("");
+  const [newCustomBody, setNewCustomBody] = useState("");
+
   useEffect(() => {
-    if (onboardingData?.step_4?.templates && Object.keys(onboardingData.step_4.templates).length > 0) {
+    if (dbTemplatesList && dbTemplatesList.length > 0) {
+      const dict: Record<string, any> = {};
+      dbTemplatesList.forEach((t) => {
+        dict[t.id] = {
+          id: t.id,
+          name: t.name,
+          subject: t.subject,
+          body: t.body,
+          is_active: t.is_active,
+          is_default: t.is_default,
+          is_custom: t.is_custom,
+          stage_key: t.stage_key,
+        };
+        // Also map by stage_key for backwards lookup
+        if (t.is_default || !dict[t.stage_key]) {
+          dict[t.stage_key] = dict[t.id];
+        }
+      });
+      setSettingsTemplates(dict);
+
+      if (!selectedTemplateId || !dbTemplatesList.some((t) => t.id === selectedTemplateId)) {
+        const match = dbTemplatesList.find((t) => t.stage_key === activeSettingsTemplate) || dbTemplatesList[0];
+        if (match) {
+          setSelectedTemplateId(match.id);
+          setActiveSettingsTemplate(match.stage_key);
+        }
+      }
+    } else if (onboardingData?.step_4?.templates && Object.keys(onboardingData.step_4.templates).length > 0) {
       setSettingsTemplates({
         ...DEFAULT_LIFECYCLE_TEMPLATES,
         ...onboardingData.step_4.templates,
       });
     }
-  }, [onboardingData]);
+  }, [dbTemplatesList, onboardingData]);
 
   const saveSettingsTemplatesMutation = useMutation({
-    mutationFn: () => {
-      const sanitized: Record<string, { subject: string; body: string; name?: string }> = {};
+    mutationFn: async () => {
+      const sanitizedBatch: Record<string, any> = {};
+      const sanitizedStep4: Record<string, any> = {};
+
       Object.entries(settingsTemplates).forEach(([k, v]) => {
-        sanitized[k] = {
-          name: v.name || k,
+        if (!v) return;
+        const key = v.stage_key || k;
+        sanitizedBatch[v.id || key] = {
+          id: v.id,
+          name: v.name || key,
+          subject: (v.subject || "").trim() || "Application Status Update",
+          body: (v.body || "").trim() || "Thank you for connecting with our recruiting team.",
+          is_active: v.is_active !== false,
+        };
+        sanitizedStep4[key] = {
+          name: v.name || key,
           subject: (v.subject || "").trim() || "Application Status Update",
           body: (v.body || "").trim() || "Thank you for connecting with our recruiting team.",
         };
       });
-      return onboardingApi.saveStep4({ templates: sanitized });
+
+      await recruitingTemplatesApi.batchSave(sanitizedBatch);
+      return onboardingApi.saveStep4({ templates: sanitizedStep4 });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
       queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
       toast({
         title: "Templates Saved",
-        description: "Candidate lifecycle email templates updated and saved to PostgreSQL.",
+        description: "Recruiting templates updated and saved to PostgreSQL database.",
       });
     },
     onError: (err: any) => {
@@ -285,21 +348,112 @@ function SettingsPageInner() {
     },
   });
 
+  const duplicateTemplateMutation = useMutation({
+    mutationFn: (templateId: string) => recruitingTemplatesApi.duplicate(templateId),
+    onSuccess: (newTmpl) => {
+      queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
+      setSelectedTemplateId(newTmpl.id);
+      setActiveSettingsTemplate(newTmpl.stage_key);
+      toast({
+        title: "Template Duplicated",
+        description: `Created copy: "${newTmpl.name}".`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to duplicate template",
+        description: err.message || "Could not duplicate template.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const toggleTemplateActiveMutation = useMutation({
+    mutationFn: (templateId: string) => recruitingTemplatesApi.toggle(templateId),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
+      toast({
+        title: updated.is_active ? "Template Activated" : "Template Disabled",
+        description: `"${updated.name}" is now ${updated.is_active ? "active" : "disabled"}.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to toggle template",
+        description: err.message || "Could not toggle template.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const setDefaultTemplateMutation = useMutation({
+    mutationFn: (templateId: string) => recruitingTemplatesApi.setDefault(templateId),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
+      toast({
+        title: "Default Template Set",
+        description: `"${updated.name}" is now the default template for ${updated.stage_key}.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to set default template",
+        description: err.message || "Could not set default template.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteTemplateMutation = useMutation({
+    mutationFn: (templateId: string) => recruitingTemplatesApi.delete(templateId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
+      setSelectedTemplateId(null);
+      toast({
+        title: "Template Deleted",
+        description: "Custom template removed successfully.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to delete template",
+        description: err.message || "Could not delete template.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const createCustomTemplateMutation = useMutation({
+    mutationFn: (data: { stage_key: string; name: string; subject: string; body: string }) =>
+      recruitingTemplatesApi.create({ ...data, is_custom: true, is_active: true }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
+      setIsAddingCustom(false);
+      setNewCustomName("");
+      setNewCustomSubject("");
+      setNewCustomBody("");
+      setSelectedTemplateId(created.id);
+      setActiveSettingsTemplate(created.stage_key);
+      toast({
+        title: "Custom Template Created",
+        description: `Created template "${created.name}".`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to create template",
+        description: err.message || "Could not create custom template.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSettingsGenerateAllAI = async () => {
     setIsGeneratingAllSettingsAI(true);
     try {
-      const hr = onboardingData?.step_1;
-      const res = await onboardingApi.generateTemplates({
-        hr_name: hr?.hr_name || "Talent Lead",
-        company_name: hr?.company_name || "Our Company",
-        hr_role: hr?.hr_role || "Recruiter",
-        email_tone: hr?.email_tone || "warm_professional",
-      });
+      const res = await recruitingTemplatesApi.regenerate();
       if (res?.templates) {
-        setSettingsTemplates((prev) => ({
-          ...prev,
-          ...res.templates,
-        }));
+        queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
         queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
         toast({
           title: "✨ All 11 Templates Generated with AI",
@@ -317,26 +471,26 @@ function SettingsPageInner() {
     }
   };
 
-  const handleSettingsRegenerateSingleAI = async (key: string) => {
-    setRegeneratingSettingsKey(key);
+  const handleSettingsRegenerateSingleAI = async (keyOrId: string, stageKey?: string) => {
+    const targetKey = stageKey || keyOrId;
+    setRegeneratingSettingsKey(keyOrId);
     try {
-      const hr = onboardingData?.step_1;
-      const res = await onboardingApi.generateTemplates({
-        hr_name: hr?.hr_name || "Talent Lead",
-        company_name: hr?.company_name || "Our Company",
-        hr_role: hr?.hr_role || "Recruiter",
-        email_tone: hr?.email_tone || "warm_professional",
-        single_template_key: key,
-      });
-      if (res?.templates && res.templates[key]) {
-        setSettingsTemplates((prev) => ({
+      const res = await recruitingTemplatesApi.regenerate({ single_template_key: targetKey });
+      if (res?.templates && res.templates[targetKey]) {
+        const item = res.templates[targetKey];
+        setSettingsTemplates((prev: any) => ({
           ...prev,
-          [key]: res.templates[key],
+          [keyOrId]: {
+            ...prev[keyOrId],
+            subject: item.subject,
+            body: item.body,
+            name: item.name || prev[keyOrId]?.name,
+          },
         }));
+        queryClient.invalidateQueries({ queryKey: ["recruiting-templates"] });
         queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
-        const name = LIFECYCLE_TEMPLATES.find((t) => t.key === key)?.name || key;
         toast({
-          title: `✨ ${name} Regenerated with AI`,
+          title: `✨ Template Regenerated with AI`,
           description: `Fresh human draft generated in ${res.latency_seconds || 1.2}s.`,
         });
       }
@@ -352,10 +506,11 @@ function SettingsPageInner() {
   };
 
   const handleInsertVariableSettings = (token: string) => {
-    const cur = settingsTemplates[activeSettingsTemplate] || { subject: "", body: "" };
+    const targetKey = selectedTemplateId || activeSettingsTemplate;
+    const cur = settingsTemplates[targetKey] || { subject: "", body: "" };
     setSettingsTemplates({
       ...settingsTemplates,
-      [activeSettingsTemplate]: {
+      [targetKey]: {
         ...cur,
         body: cur.body ? `${cur.body} ${token}` : token,
       },
@@ -1150,18 +1305,120 @@ function SettingsPageInner() {
               </div>
             </div>
 
-            {/* 11 Stages Pill Navigation */}
-            <div className="relative">
+            {/* All Templates Pill Navigation (from DB + Custom) */}
+            <div className="relative space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Select Template ({dbTemplatesList?.length || 11} in Database):
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAddingCustom(!isAddingCustom)}
+                  className="h-7 text-xs px-2.5 gap-1 border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>{isAddingCustom ? "Cancel" : "Add Custom Template"}</span>
+                </Button>
+              </div>
+
+              {/* Inline Custom Template Creator */}
+              {isAddingCustom && (
+                <Card className="border border-primary/30 bg-primary/5 p-3.5 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-foreground">Create New Recruiting Template</h4>
+                    <span className="text-[10px] text-muted-foreground">Saved directly to PostgreSQL</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-muted-foreground">Template Name</label>
+                      <Input
+                        value={newCustomName}
+                        onChange={(e) => setNewCustomName(e.target.value)}
+                        placeholder="e.g. Technical Deep Dive Invite"
+                        className="text-xs h-8 bg-background"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-muted-foreground">Stage Key</label>
+                      <Input
+                        value={newCustomStage}
+                        onChange={(e) => setNewCustomStage(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
+                        placeholder="e.g. technical_interview"
+                        className="text-xs h-8 bg-background font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-muted-foreground">Subject Line</label>
+                    <Input
+                      value={newCustomSubject}
+                      onChange={(e) => setNewCustomSubject(e.target.value)}
+                      placeholder="e.g. Next Step: Technical Discussion for {role} at {company}"
+                      className="text-xs h-8 bg-background font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-muted-foreground">Body</label>
+                    <Textarea
+                      rows={4}
+                      value={newCustomBody}
+                      onChange={(e) => setNewCustomBody(e.target.value)}
+                      placeholder="Hi {candidate_name}, we'd love to invite you to..."
+                      className="text-xs bg-background"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsAddingCustom(false)}
+                      className="h-7 text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={createCustomTemplateMutation.isPending || !newCustomName || !newCustomSubject || !newCustomBody}
+                      onClick={() =>
+                        createCustomTemplateMutation.mutate({
+                          stage_key: newCustomStage || "custom_stage",
+                          name: newCustomName,
+                          subject: newCustomSubject,
+                          body: newCustomBody,
+                        })
+                      }
+                      className="h-7 text-xs bg-primary text-primary-foreground gap-1"
+                    >
+                      <Save className="w-3 h-3" />
+                      <span>{createCustomTemplateMutation.isPending ? "Saving..." : "Save New Template"}</span>
+                    </Button>
+                  </div>
+                </Card>
+              )}
+
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-                {LIFECYCLE_TEMPLATES.map((tmpl) => {
-                  const isActive = activeSettingsTemplate === tmpl.key;
-                  const hasCustomBody = Boolean(settingsTemplates[tmpl.key]?.body);
+                {(dbTemplatesList && dbTemplatesList.length > 0 ? dbTemplatesList : LIFECYCLE_TEMPLATES).map((item: any) => {
+                  const itemKey = item.id || item.key;
+                  const itemStageKey = item.stage_key || item.key;
+                  const itemName = item.name || item.shortName || itemStageKey;
+                  const isActive = selectedTemplateId === item.id || activeSettingsTemplate === itemStageKey;
+                  const isDbActive = item.is_active !== false;
+                  const isDbDefault = Boolean(item.is_default);
+                  const isDbCustom = Boolean(item.is_custom);
+
                   return (
                     <button
-                      key={tmpl.key}
+                      key={itemKey}
                       type="button"
                       onClick={() => {
-                        setActiveSettingsTemplate(tmpl.key);
+                        if (item.id) {
+                          setSelectedTemplateId(item.id);
+                        }
+                        setActiveSettingsTemplate(itemStageKey);
                         setSettingsPreviewMode(false);
                       }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1.5 transition-all border ${
@@ -1172,10 +1429,20 @@ function SettingsPageInner() {
                     >
                       <span
                         className={`w-1.5 h-1.5 rounded-full ${
-                          isActive ? "bg-white" : hasCustomBody ? "bg-emerald-500" : "bg-muted-foreground/40"
+                          isActive
+                            ? "bg-white"
+                            : isDbActive
+                            ? "bg-emerald-500"
+                            : "bg-muted-foreground/40"
                         }`}
                       />
-                      <span>{tmpl.shortName}</span>
+                      <span>{itemName}</span>
+                      {isDbDefault && <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400 ml-0.5" />}
+                      {isDbCustom && (
+                        <span className="text-[9px] px-1 rounded bg-muted/60 border border-border/60 font-mono">
+                          custom
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1184,9 +1451,31 @@ function SettingsPageInner() {
 
             {/* Active Template Card */}
             {(() => {
+              const activeItem =
+                (dbTemplatesList || []).find((t) => t.id === selectedTemplateId) ||
+                (dbTemplatesList || []).find((t) => t.stage_key === activeSettingsTemplate) ||
+                null;
+
               const currentConfig =
-                LIFECYCLE_TEMPLATES.find((t) => t.key === activeSettingsTemplate) || LIFECYCLE_TEMPLATES[0];
-              const tmpl = settingsTemplates[activeSettingsTemplate] || { subject: "", body: "" };
+                LIFECYCLE_TEMPLATES.find((t) => t.key === activeSettingsTemplate) ||
+                (activeItem
+                  ? {
+                      name: activeItem.name,
+                      shortName: activeItem.name,
+                      key: activeItem.stage_key,
+                      description: activeItem.description || `Template for stage: ${activeItem.stage_key}`,
+                    }
+                  : LIFECYCLE_TEMPLATES[0]);
+
+              const activeKey = selectedTemplateId || activeSettingsTemplate;
+              const tmpl = settingsTemplates[activeKey] || settingsTemplates[activeSettingsTemplate] || {
+                subject: activeItem?.subject || "",
+                body: activeItem?.body || "",
+                name: activeItem?.name || currentConfig.name,
+                is_active: activeItem?.is_active ?? true,
+                is_default: activeItem?.is_default ?? true,
+                is_custom: activeItem?.is_custom ?? false,
+              };
 
               const hrInfo = onboardingData?.step_1;
               const sampleVars: Record<string, string> = {
@@ -1226,62 +1515,135 @@ function SettingsPageInner() {
                 return b;
               })();
 
+              const isDefaultTmpl = activeItem?.is_default ?? tmpl.is_default ?? false;
+              const isActiveTmpl = activeItem?.is_active ?? tmpl.is_active ?? true;
+              const isCustomTmpl = activeItem?.is_custom ?? tmpl.is_custom ?? false;
+
               return (
                 <Card className="border border-border/80 dark:border-white/[0.08] bg-card shadow-xs rounded-xl overflow-hidden">
                   <CardHeader className="pb-3 border-b border-border/50">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <CardTitle className="text-sm font-bold text-foreground">
-                            {currentConfig.name}
+                            {tmpl.name || currentConfig.name}
                           </CardTitle>
                           <Badge variant="secondary" className="text-[10px] font-mono">
-                            {activeSettingsTemplate}
+                            {activeItem?.stage_key || activeSettingsTemplate}
                           </Badge>
+                          {isDefaultTmpl && (
+                            <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-300 dark:border-amber-800 flex items-center gap-0.5">
+                              <Star className="w-2.5 h-2.5 fill-amber-400" /> Default
+                            </Badge>
+                          )}
+                          <Badge
+                            variant={isActiveTmpl ? "default" : "destructive"}
+                            className="text-[10px] font-semibold"
+                          >
+                            {isActiveTmpl ? "Active" : "Disabled"}
+                          </Badge>
+                          {isCustomTmpl && (
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                              Custom
+                            </Badge>
+                          )}
                         </div>
                         <CardDescription className="text-xs text-muted-foreground">
                           {currentConfig.description}
                         </CardDescription>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                        {/* Set Default */}
+                        {activeItem && !isDefaultTmpl && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDefaultTemplateMutation.mutate(activeItem.id)}
+                            disabled={setDefaultTemplateMutation.isPending}
+                            className="h-7 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
+                            title="Set this template as default for this stage"
+                          >
+                            <Star className="w-3 h-3 text-amber-500" />
+                            <span>Set Default</span>
+                          </Button>
+                        )}
+
+                        {/* Toggle Active / Disabled */}
+                        {activeItem && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => toggleTemplateActiveMutation.mutate(activeItem.id)}
+                            disabled={toggleTemplateActiveMutation.isPending}
+                            className={`h-7 text-xs px-2 gap-1 ${
+                              isActiveTmpl
+                                ? "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800"
+                                : "text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+                            }`}
+                            title={isActiveTmpl ? "Disable template (will pause if triggered)" : "Activate template"}
+                          >
+                            <span>{isActiveTmpl ? "Disable" : "Enable"}</span>
+                          </Button>
+                        )}
+
+                        {/* Duplicate */}
+                        {activeItem && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => duplicateTemplateMutation.mutate(activeItem.id)}
+                            disabled={duplicateTemplateMutation.isPending}
+                            className="h-7 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
+                            title="Duplicate this template"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>Duplicate</span>
+                          </Button>
+                        )}
+
                         {/* Regenerate this template with AI */}
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => handleSettingsRegenerateSingleAI(activeSettingsTemplate)}
-                          disabled={regeneratingSettingsKey === activeSettingsTemplate}
+                          onClick={() => handleSettingsRegenerateSingleAI(activeKey, activeItem?.stage_key || activeSettingsTemplate)}
+                          disabled={regeneratingSettingsKey === activeKey}
                           className="h-7 text-xs px-2.5 gap-1 border-border/80 hover:border-primary/50 text-foreground"
                           title="Regenerate this specific template with AI"
                         >
                           <RefreshCw
                             className={`w-3 h-3 text-primary ${
-                              regeneratingSettingsKey === activeSettingsTemplate ? "animate-spin" : ""
+                              regeneratingSettingsKey === activeKey ? "animate-spin" : ""
                             }`}
                           />
                           <span>
-                            {regeneratingSettingsKey === activeSettingsTemplate ? "Regenerating..." : "Regenerate AI"}
+                            {regeneratingSettingsKey === activeKey ? "Regenerating..." : "Regenerate AI"}
                           </span>
                         </Button>
 
-                        {/* Copy Body */}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            navigator.clipboard.writeText(tmpl.body);
-                            toast({
-                              title: "Template Copied",
-                              description: `Copied "${currentConfig.name}" body to clipboard.`,
-                            });
-                          }}
-                          className="h-7 text-xs px-2.5 gap-1 border-border/80 text-muted-foreground hover:text-foreground"
-                        >
-                          <Copy className="w-3 h-3" />
-                          <span>Copy</span>
-                        </Button>
+                        {/* Delete Custom/Duplicate */}
+                        {activeItem && isCustomTmpl && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`Delete template "${tmpl.name}"?`)) {
+                                deleteTemplateMutation.mutate(activeItem.id);
+                              }
+                            }}
+                            disabled={deleteTemplateMutation.isPending}
+                            className="h-7 text-xs px-2 gap-1 text-destructive hover:bg-destructive/10 border-destructive/30"
+                            title="Delete custom template"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Delete</span>
+                          </Button>
+                        )}
 
                         {/* Edit vs Preview Toggle */}
                         <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/60 text-xs">
@@ -1346,6 +1708,7 @@ function SettingsPageInner() {
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                               setSettingsTemplates({
                                 ...settingsTemplates,
+                                [activeKey]: { ...tmpl, subject: e.target.value },
                                 [activeSettingsTemplate]: { ...tmpl, subject: e.target.value },
                               })
                             }
@@ -1363,6 +1726,7 @@ function SettingsPageInner() {
                             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                               setSettingsTemplates({
                                 ...settingsTemplates,
+                                [activeKey]: { ...tmpl, body: e.target.value },
                                 [activeSettingsTemplate]: { ...tmpl, body: e.target.value },
                               })
                             }

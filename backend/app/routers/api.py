@@ -18,6 +18,7 @@ from app.routers import (
     onboarding,
     outreach,
     pipeline_agent,
+    recruiting_templates,
     scheduling,
     search,
 )
@@ -37,6 +38,7 @@ api_router.include_router(cv_review.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(notifications.router)
 api_router.include_router(onboarding.router)
+api_router.include_router(recruiting_templates.router)
 api_router.include_router(search.router)
 api_router.include_router(agent_settings.router)
 api_router.include_router(pipeline_agent.router)

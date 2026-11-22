@@ -1,5 +1,5 @@
 """
-Database and Storage Reset Script for Job Tracker / TalentFlow.
+Database and Storage Reset Script for Hiring Loop.
 
 Usage:
   python scripts/reset_db.py --dry-run

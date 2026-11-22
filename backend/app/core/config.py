@@ -10,7 +10,7 @@ _ENV_PATH = _BACKEND_DIR / ".env"
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Job Tracker API"
+    PROJECT_NAME: str = "Hiring Loop API"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"

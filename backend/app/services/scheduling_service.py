@@ -1152,31 +1152,37 @@ class SchedulingService:
 
         meet_text = f"Google Meet Link: {interview.meet_link}" if interview.meet_link else "Meeting details will follow."
 
-        if event_type == "confirmation":
-            subject = f"Confirmed: Interview for {job_title} on {date_str}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Your interview for the {job_title} position has been scheduled for {date_str}.\n\n"
-                f"{meet_text}\n\n"
-                f"If you need to reschedule or cancel, you can do so through your scheduling link.\n\n"
-                f"Best regards,\nRecruiting Team"
-            )
-        elif event_type == "reschedule":
-            subject = f"Rescheduled: Interview for {job_title} on {date_str}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Your interview for the {job_title} position has been rescheduled to {date_str}.\n\n"
-                f"{meet_text}\n\n"
-                f"Best regards,\nRecruiting Team"
-            )
-        else: # cancellation
-            subject = f"Cancelled: Interview for {job_title}"
-            body = (
-                f"Hi {candidate.name},\n\n"
-                f"Your interview for the {job_title} position scheduled for {date_str} has been cancelled.\n\n"
-                f"Please reach out if you would like to reschedule.\n\n"
-                f"Best regards,\nRecruiting Team"
-            )
+        stage_key = "rejection" if event_type == "cancellation" else "initial_interview"
+        ctx = {
+            "candidate_name": candidate.name,
+            "role": job_title,
+            "company": "Our Company",
+            "hr_name": "Recruiting Team",
+            "interview_date": local_dt.strftime("%A, %b %d"),
+            "interview_time": local_dt.strftime("%I:%M %p (%Z)"),
+            "meet_link": interview.meet_link or "",
+            "schedule_link": "",
+            "job_details": "",
+        }
+        try:
+            from app.models.onboarding import OnboardingSetup
+            onboarding = session.exec(
+                select(OnboardingSetup).where(OnboardingSetup.user_id == interview.user_id)
+            ).first()
+            if onboarding:
+                if onboarding.company_name:
+                    ctx["company"] = onboarding.company_name
+                if onboarding.hr_name:
+                    ctx["hr_name"] = onboarding.hr_name
+        except Exception:
+            pass
+
+        subject, html_body, body, _ = render_user_template(
+            session=session,
+            user_id=interview.user_id,
+            template_id=stage_key,
+            context=ctx,
+        )
 
         try:
             google_svc = GoogleService(session)

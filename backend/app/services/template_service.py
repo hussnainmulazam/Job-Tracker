@@ -1,44 +1,36 @@
 """
 backend/app/services/template_service.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Service for AI-generated and deterministic recruiting email templates.
-Creates short, warm, and human templates across the 11 lifecycle stages:
-  1) CV Received
-  2) CV Passed
-  3) Job Details
-  4) Initial Interview
-  5) Initial Passed
-  6) Behavioral Interview
-  7) Behavioral Passed
-  8) Final Interview
-  9) Offer Letter
-  10) Rejection (per stage)
-  11) Interview Reminder
-
-Supported dynamic variables:
-  {candidate_name}, {role}, {company}, {hr_name}, {interview_date},
-  {interview_time}, {meet_link}, {schedule_link}, {job_details}
-
-Sending NEVER calls the AI — it performs pure deterministic variable substitution.
+Service for database-backed recruiting email templates (Single Source of Truth).
+Rules:
+1. Templates come ONLY from the database table 'recruiting_templates'.
+2. Missing default templates are seeded once per HR account and never overwrite HR edits.
+3. The agent workflow and every email/WhatsApp sender load templates by stage key from this table only. No hardcoded email text anywhere in code.
+4. If a template is missing or disabled: pause that step with "Template missing: <name>" and a link to Settings. Never send a fallback.
+5. At send time only fill variables: {candidate_name} {role} {company} {hr_name} {interview_date} {interview_time} {meet_link} {schedule_link} {job_details}. Never call the LLM to write email text at send time. A missing variable blocks sending and flags HR.
+6. Cache templates with a short TTL and clear the cache on every save, regenerate, disable or duplicate.
 """
 import logging
+import re
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple, Set
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple, Set
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from app.models.recruiting_template import RecruitingTemplate
 from app.services.ai_router import ai_router
 from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
-# Cache TTL for templates: 300s (5 minutes)
-TEMPLATE_CACHE_TTL = 300
+# Cache TTL for templates: 60s (short TTL)
+TEMPLATE_CACHE_TTL = 60
 
 
 def clear_user_template_cache(user_id: Optional[uuid.UUID] = None) -> None:
-    """Invalidates dual-layer template cache for a specific user or all users."""
+    """Invalidates template cache for a specific user or all users."""
     if user_id:
         cache_service.delete(f"templates:user:{user_id}")
     else:
@@ -50,8 +42,16 @@ class MissingTemplateVariablesError(Exception):
     pass
 
 
-class TemplateNotFoundError(Exception):
-    """Raised when an unknown template key is requested."""
+class TemplateMissingOrDisabledError(Exception):
+    """Raised when a required lifecycle template is missing or disabled in the DB."""
+    def __init__(self, stage_name: str, settings_link: str = "/settings?tab=templates"):
+        self.stage_name = stage_name
+        self.settings_link = settings_link
+        super().__init__(f"Template missing: {stage_name}. Configure at {settings_link}")
+
+
+class TemplateNotFoundError(TemplateMissingOrDisabledError):
+    """Alias for backwards compatibility."""
     pass
 
 
@@ -62,12 +62,21 @@ TEMPLATE_ALIASES: Dict[str, str] = {
     "initial_screen": "initial_interview",
     "behavioral": "behavioral_interview",
     "final_round": "final_interview",
-    "application_on_hold": "on_hold",
+    "application_on_hold": "rejection",
     "interview_reminder_24h": "interview_reminder",
     "interview_reminder_1h": "interview_reminder",
+    "hr_interviewer_reminder": "interview_reminder",
+    "hr_interview_scheduled": "initial_interview",
+    "interview_confirmed": "initial_interview",
+    "interview_rescheduled": "initial_interview",
+    "interview_cancellation": "rejection",
+    "interview_cancelled": "rejection",
+    "interview_reschedule": "initial_interview",
+    "interview_confirmation": "initial_interview",
+    "application_approved_interview_invitation": "cv_passed",
 }
 
-TEMPLATE_CONFIGS: Dict[str, Dict[str, str]] = {
+TEMPLATE_CONFIGS: Dict[str, Dict[str, Any]] = {
     "cv_received": {
         "name": "CV Received",
         "description": "Sent when an applicant's CV is first received to confirm intake.",
@@ -125,11 +134,27 @@ TEMPLATE_CONFIGS: Dict[str, Dict[str, str]] = {
     },
 }
 
+SUPPORTED_VARIABLE_KEYS: Set[str] = {
+    "candidate_name",
+    "role",
+    "company",
+    "hr_name",
+    "interview_date",
+    "interview_time",
+    "meet_link",
+    "schedule_link",
+    "job_details",
+    "signature",
+}
+
 
 class TemplateItemSchema(BaseModel):
     name: Optional[str] = None
     subject: str = Field(..., min_length=2)
     body: str = Field(..., min_length=5)
+    is_active: bool = True
+    is_default: bool = True
+    is_custom: bool = False
 
 
 class TemplatesBatchSchema(BaseModel):
@@ -144,10 +169,11 @@ def get_default_templates(
     """
     Returns authentic, short, and warm human templates for all 11 stages.
     Never robotic; uses clean conversational recruiter language.
+    Only used once to seed missing defaults in the DB.
     """
-    is_casual = "casual" in email_tone.lower()
-    is_direct = "direct" in email_tone.lower()
-    is_formal = "formal" in email_tone.lower()
+    is_casual = "casual" in (email_tone or "").lower()
+    is_direct = "direct" in (email_tone or "").lower()
+    is_formal = "formal" in (email_tone or "").lower()
 
     if is_casual:
         salutation = "Hey {candidate_name}!"
@@ -159,7 +185,6 @@ def get_default_templates(
         salutation = "Dear {candidate_name},"
         signoff = f"Sincerely,\n{hr_name}\n{{company}}"
     else:
-        # Warm & Professional
         salutation = "Hi {candidate_name},"
         signoff = f"Warm regards,\n{hr_name}\n{{company}}"
 
@@ -169,9 +194,8 @@ def get_default_templates(
             "subject": "Got your application for {role} at {company}!",
             "body": (
                 f"{salutation}\n\n"
-                "Thank you for sharing your resume with us for the {role} position. "
-                "I've received your CV and our hiring team is reviewing it now.\n\n"
-                "We know how much effort goes into applying, so we'll be in touch with next steps as soon as we finish our review.\n\n"
+                "Thank you for sharing your application with us! We have received your CV for the {role} position.\n\n"
+                "Our team is reviewing your background and qualifications. We will get back to you as soon as we've reviewed your materials.\n\n"
                 f"{signoff}"
             ),
         },
@@ -183,18 +207,17 @@ def get_default_templates(
                 "Your background caught our eye! Your skills and experience align closely with what we're building for {role} at {company}.\n\n"
                 "We'd love to chat and get to know you better. Please pick a time that works best for you here:\n"
                 "{schedule_link}\n\n"
-                "Looking forward to our conversation!\n\n"
                 f"{signoff}"
             ),
         },
         "job_details": {
             "name": "Job Details",
-            "subject": "More details on the {role} opportunity at {company}",
+            "subject": "More details about the {role} opening at {company}",
             "body": (
                 f"{salutation}\n\n"
-                "Here is an overview of what you'll be driving as {role} at {company}:\n\n"
+                "Here are a few more details on what the {role} role looks like day-to-day at {company}:\n\n"
                 "{job_details}\n\n"
-                "If this sounds exciting, grab a quick time on my calendar so we can talk through your questions:\n"
+                "If this sounds exciting to you, schedule your introductory call here:\n"
                 "{schedule_link}\n\n"
                 f"{signoff}"
             ),
@@ -295,6 +318,155 @@ def get_default_templates(
     }
 
 
+def seed_missing_default_templates(session: Session, user_id: uuid.UUID) -> List[RecruitingTemplate]:
+    """
+    Requirement 2: Seed missing defaults ONCE per HR account.
+    NEVER overwrite HR edits!
+    If a template already exists for that user and stage_key, it is left untouched.
+    If the user previously edited templates in OnboardingSetup.templates, those edits
+    are preserved and transferred into the recruiting_templates table.
+    """
+    # 1. Fetch existing recruiting_templates rows for this user
+    existing_templates = session.exec(
+        select(RecruitingTemplate).where(RecruitingTemplate.user_id == user_id)
+    ).all()
+    existing_keys: Set[str] = {t.stage_key for t in existing_templates}
+
+    # 2. Check if user has legacy/onboarding templates saved
+    onboarding_templates: Dict[str, Any] = {}
+    hr_name = "Recruiting Team"
+    company_name = "Our Company"
+    email_tone = "warm_professional"
+
+    try:
+        from app.models.onboarding import OnboardingSetup
+        onboarding = session.exec(
+            select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)
+        ).first()
+        if onboarding:
+            if onboarding.hr_name:
+                hr_name = onboarding.hr_name
+            if onboarding.company_name:
+                company_name = onboarding.company_name
+            if onboarding.email_tone:
+                email_tone = onboarding.email_tone
+            if onboarding.templates and isinstance(onboarding.templates, dict):
+                onboarding_templates = onboarding.templates
+    except Exception as exc:
+        logger.debug("Could not read OnboardingSetup during template seeding: %s", exc)
+
+    code_defaults = get_default_templates(hr_name=hr_name, company_name=company_name, email_tone=email_tone)
+
+    inserted_count = 0
+    now = datetime.now(timezone.utc)
+
+    # 3. Seed only missing default stages
+    for stage_key, cfg in TEMPLATE_CONFIGS.items():
+        if stage_key in existing_keys:
+            continue  # NEVER overwrite HR edits!
+
+        # Check if user already edited this in OnboardingSetup
+        user_saved = onboarding_templates.get(stage_key)
+        if user_saved and isinstance(user_saved, dict) and user_saved.get("subject") and user_saved.get("body"):
+            subject = user_saved.get("subject", "").strip()
+            body = user_saved.get("body", "").strip()
+            name = user_saved.get("name") or cfg.get("name", stage_key.replace("_", " ").title())
+            is_active = user_saved.get("is_active", True)
+        else:
+            default_item = code_defaults.get(stage_key, {})
+            subject = default_item.get("subject", f"Update regarding {{role}} at {{company}}")
+            body = default_item.get("body", "Thank you for connecting with our team.")
+            name = default_item.get("name", cfg.get("name", stage_key.replace("_", " ").title()))
+            is_active = True
+
+        new_tmpl = RecruitingTemplate(
+            user_id=user_id,
+            stage_key=stage_key,
+            name=name,
+            description=cfg.get("description", ""),
+            subject=subject,
+            body=body,
+            is_active=is_active,
+            is_default=True,
+            is_custom=False,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(new_tmpl)
+        inserted_count += 1
+
+    if inserted_count > 0:
+        session.commit()
+        clear_user_template_cache(user_id)
+        logger.info("Seeded %d missing default recruiting templates for user %s", inserted_count, user_id)
+
+    return session.exec(
+        select(RecruitingTemplate).where(RecruitingTemplate.user_id == user_id).order_by(RecruitingTemplate.created_at)
+    ).all()
+
+
+def get_user_templates_from_db(session: Session, user_id: uuid.UUID) -> List[RecruitingTemplate]:
+    """
+    Loads templates strictly from PostgreSQL recruiting_templates table.
+    Caches with short TTL (60s).
+    """
+    cache_key = f"templates:user:{user_id}"
+    cached = cache_service.get(cache_key)
+    if cached is not None and isinstance(cached, list):
+        return [RecruitingTemplate.model_validate(item) for item in cached]
+
+    # Seed any missing defaults once (never overwriting user edits)
+    templates = seed_missing_default_templates(session, user_id)
+
+    # Cache as dictionaries for serialization safety
+    serialized = [t.model_dump() for t in templates]
+    cache_service.set(cache_key, serialized, ttl=TEMPLATE_CACHE_TTL)
+    return templates
+
+
+def get_template_for_stage(
+    session: Session,
+    user_id: uuid.UUID,
+    stage_key: str,
+) -> RecruitingTemplate:
+    """
+    Loads template strictly by stage key from the DB.
+    Resolves aliases deterministically.
+    If template is missing or disabled: raises TemplateMissingOrDisabledError.
+    NEVER sends a fallback!
+    """
+    resolved_key = TEMPLATE_ALIASES.get(stage_key.lower().strip(), stage_key.lower().strip())
+    templates = get_user_templates_from_db(session, user_id)
+
+    # Filter matching candidates for this stage key
+    matching = [
+        t for t in templates
+        if t.stage_key.lower() == resolved_key or t.stage_key.lower() == stage_key.lower()
+    ]
+
+    if not matching:
+        # Check if there is an exact custom template matching stage_key
+        matching = [t for t in templates if t.stage_key.lower() == stage_key.lower()]
+
+    if not matching:
+        cfg = TEMPLATE_CONFIGS.get(resolved_key) or TEMPLATE_CONFIGS.get(stage_key)
+        name = cfg.get("name", stage_key.replace("_", " ").title()) if cfg else stage_key
+        raise TemplateMissingOrDisabledError(stage_name=name)
+
+    # Prefer is_default=True, then first active
+    active_defaults = [t for t in matching if t.is_default and t.is_active]
+    if active_defaults:
+        return active_defaults[0]
+
+    actives = [t for t in matching if t.is_active]
+    if actives:
+        return actives[0]
+
+    # All matching templates are disabled!
+    tmpl = matching[0]
+    raise TemplateMissingOrDisabledError(stage_name=f"{tmpl.name} (disabled)")
+
+
 def fill_template_variables(template_str: str, variables: Dict[str, Any]) -> str:
     """
     Pure deterministic variable substitution. Never calls AI.
@@ -310,55 +482,13 @@ def fill_template_variables(template_str: str, variables: Dict[str, Any]) -> str
     return result
 
 
-def get_user_templates(session: Session, user_id: uuid.UUID) -> Dict[str, Dict[str, Any]]:
-    """
-    Loads templates strictly from PostgreSQL OnboardingSetup (single source of truth).
-    Caches in memory with 60-second TTL.
-    If the user has no saved templates in DB, seeds them ONCE from code defaults,
-    saves them to DB, and never reads code defaults again.
-    """
-    cache_key = f"templates:user:{user_id}"
-    cached = cache_service.get(cache_key)
-    if cached is not None and isinstance(cached, dict):
-        return cached
-
-    try:
-        from app.models.onboarding import OnboardingSetup
-        onboarding = session.exec(select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)).first()
-    except Exception as exc:
-        logger.debug("Could not query OnboardingSetup (falling back to defaults): %s", exc)
-        return get_default_templates()
-
-    if not onboarding or not onboarding.templates or len(onboarding.templates) == 0:
-        hr_name = (onboarding.hr_name if onboarding else None) or "Recruiting Team"
-        company_name = (onboarding.company_name if onboarding else None) or "Our Company"
-        email_tone = (onboarding.email_tone if onboarding else None) or "warm_professional"
-        seeded = get_default_templates(hr_name=hr_name, company_name=company_name, email_tone=email_tone)
-
-        try:
-            if not onboarding:
-                onboarding = OnboardingSetup(
-                    user_id=user_id,
-                    hr_name=hr_name,
-                    company_name=company_name,
-                    email_tone=email_tone,
-                    templates=seeded,
-                    is_completed=False,
-                    current_step=4,
-                )
-                session.add(onboarding)
-            else:
-                onboarding.templates = seeded
-                session.add(onboarding)
-            session.commit()
-            session.refresh(onboarding)
-        except Exception as exc:
-            logger.debug("Could not persist seeded templates: %s", exc)
-            return seeded
-
-    templates_map = dict(onboarding.templates) if onboarding and onboarding.templates else {}
-    cache_service.set(cache_key, templates_map, ttl=TEMPLATE_CACHE_TTL)
-    return templates_map
+def extract_template_variable_placeholders(text: str) -> Set[str]:
+    """Finds all {var} and {{var}} placeholders within a template string."""
+    if not text:
+        return set()
+    single_brace = set(re.findall(r"\{([a-zA-Z0-9_]+)\}", text))
+    double_brace = set(re.findall(r"\{\{([a-zA-Z0-9_]+)\}\}", text))
+    return single_brace.union(double_brace)
 
 
 def render_user_template(
@@ -368,27 +498,22 @@ def render_user_template(
     context: Dict[str, Any],
 ) -> Tuple[str, str, str, str]:
     """
-    Loads template strictly from DB (single source of truth).
-    Validates required variables deterministically.
-    Fills {variables} and {{variables}} deterministically.
-    Never calls AI at send time.
+    Requirement 3, 4 & 5:
+    1. Loads template strictly from DB (single source of truth).
+    2. If missing or disabled: raises TemplateMissingOrDisabledError. Never sends fallback.
+    3. Strictly validates required variables: {candidate_name} {role} {company} {hr_name}
+       {interview_date} {interview_time} {meet_link} {schedule_link} {job_details}.
+       If any variable used in template is missing, blocks sending and flags HR.
+    4. Never calls the LLM at send time — pure deterministic variable substitution.
     Returns: (subject, html_body, text_body, preheader)
     """
-    user_templates = get_user_templates(session, user_id)
-    resolved_id = TEMPLATE_ALIASES.get(template_id, template_id)
+    tmpl = get_template_for_stage(session, user_id, template_id)
 
-    tpl_cfg = user_templates.get(resolved_id) or user_templates.get(template_id)
-    if not tpl_cfg:
-        defaults = get_default_templates()
-        tpl_cfg = defaults.get(resolved_id) or defaults.get(template_id)
-        if not tpl_cfg:
-            raise TemplateNotFoundError(f"Template '{template_id}' not found in user database.")
-
-    raw_subject = tpl_cfg.get("subject", "")
-    raw_body = tpl_cfg.get("body", "")
+    raw_subject = tmpl.subject or ""
+    raw_body = tmpl.body or ""
 
     # Normalize variable aliases for deterministic fill
-    normalized_ctx = {k: v for k, v in context.items()}
+    normalized_ctx: Dict[str, Any] = {k: v for k, v in context.items()}
     if "job_title" in normalized_ctx and "role" not in normalized_ctx:
         normalized_ctx["role"] = normalized_ctx["job_title"]
     if "role" in normalized_ctx and "job_title" not in normalized_ctx:
@@ -401,29 +526,48 @@ def render_user_template(
         normalized_ctx["meet_link"] = normalized_ctx["meeting_link"]
     if "meet_link" in normalized_ctx and "meeting_link" not in normalized_ctx:
         normalized_ctx["meeting_link"] = normalized_ctx["meet_link"]
+    if "booking_link" in normalized_ctx and "schedule_link" not in normalized_ctx:
+        normalized_ctx["schedule_link"] = normalized_ctx["booking_link"]
     if "slot_link" in normalized_ctx and "schedule_link" not in normalized_ctx:
         normalized_ctx["schedule_link"] = normalized_ctx["slot_link"]
-    if "schedule_link" in normalized_ctx and "slot_link" not in normalized_ctx:
-        normalized_ctx["slot_link"] = normalized_ctx["schedule_link"]
+    if "schedule_link" in normalized_ctx and "booking_link" not in normalized_ctx:
+        normalized_ctx["booking_link"] = normalized_ctx["schedule_link"]
+    if "job_description" in normalized_ctx and "job_details" not in normalized_ctx:
+        normalized_ctx["job_details"] = normalized_ctx["job_description"]
 
-    # Variable validation: candidate_name is strictly required
-    required_keys = ["candidate_name"]
-    if "rejection" in resolved_id or "reject" in resolved_id:
-        if not normalized_ctx.get("feedback"):
-            normalized_ctx["feedback"] = "Thank you for the time invested in interviewing with our team. We wish you continued success."
-
-    missing = [k for k in required_keys if not normalized_ctx.get(k)]
-    if missing:
+    # Candidate name is globally mandatory
+    if not normalized_ctx.get("candidate_name"):
         raise MissingTemplateVariablesError(
-            f"Cannot send '{template_id}'. Required variable(s) missing: {missing}. Blocked and flagged for HR."
+            f"Cannot send '{tmpl.name}'. Required variable 'candidate_name' is missing. Blocked and flagged for HR."
         )
 
-    # Pure deterministic substitution
+    # Check which variables are present in the subject and body
+    used_vars = extract_template_variable_placeholders(raw_subject).union(
+        extract_template_variable_placeholders(raw_body)
+    )
+
+    missing: List[str] = []
+    for var in used_vars:
+        if var in SUPPORTED_VARIABLE_KEYS:
+            val = normalized_ctx.get(var)
+            if val is None or (isinstance(val, str) and not val.strip()):
+                missing.append(var)
+
+    if missing:
+        raise MissingTemplateVariablesError(
+            f"Cannot send '{tmpl.name}'. Required variable(s) {missing} used in template are missing or empty. Blocked and flagged for HR."
+        )
+
+    # Pure deterministic variable substitution. Never calls LLM.
     subject = fill_template_variables(raw_subject, normalized_ctx)
     text_body = fill_template_variables(raw_body, normalized_ctx)
     preheader = subject
 
-    html_paragraphs = "".join(f"<p style='margin: 0 0 16px 0; line-height: 1.6;'>{p.strip()}</p>" for p in text_body.split("\n\n") if p.strip())
+    html_paragraphs = "".join(
+        f"<p style='margin: 0 0 16px 0; line-height: 1.6;'>{p.strip()}</p>"
+        for p in text_body.split("\n\n")
+        if p.strip()
+    )
     html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>{subject}</title></head>
@@ -445,9 +589,8 @@ async def generate_recruiting_templates_ai(
     single_template_key: Optional[str] = None,
 ) -> tuple[Dict[str, Dict[str, str]], bool, Optional[str], float]:
     """
-    Calls the AI model chain to generate authentic, non-robotic templates using HR profile & tone.
-    If single_template_key is provided, regenerates only that specific template.
-    Falls back gracefully to deterministic templates if AI call encounters any failure.
+    Calls AI model chain strictly for one-off authoring/regeneration in Settings.
+    Never called at send time.
     """
     t0 = time.perf_counter()
     target_keys = (
@@ -460,7 +603,7 @@ async def generate_recruiting_templates_ai(
         "You are an elite corporate talent acquisition partner and master copywriter.\n"
         "Your task is to write authentic, short, warm, and human candidate email templates.\n\n"
         "STRICT TONE GUIDELINES:\n"
-        f"- Target Tone: {email_tone.replace('_', ' ').title()}\n"
+        f"- Target Tone: {(email_tone or 'warm_professional').replace('_', ' ').title()}\n"
         "- MUST BE SHORT, WARM AND HUMAN. NEVER ROBOTIC.\n"
         "- NEVER use cliché robotic phrases like 'I hope this email finds you well', 'Please find attached', "
         "'Per our discussion', or 'We regret to inform you'. Sound like a real recruiter having a thoughtful conversation.\n"
@@ -504,7 +647,6 @@ async def generate_recruiting_templates_ai(
                 "body": v.body.strip(),
             }
 
-        # If partial response, backfill missing keys from defaults
         defaults = get_default_templates(
             hr_name=hr_name or "Talent Team",
             company_name=company_name or "Our Company",

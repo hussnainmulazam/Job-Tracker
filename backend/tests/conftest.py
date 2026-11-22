@@ -92,6 +92,7 @@ def session_fixture(engine) -> Generator[Session, None, None]:
         JobOpening,
         Message,
         Notification,
+        RecruitingTemplate,
         SchedulingLink,
         User,
     )
@@ -108,6 +109,7 @@ def session_fixture(engine) -> Generator[Session, None, None]:
             CandidateLink,
             EmailSynced,
             GoogleAccount,
+            RecruitingTemplate,
             Candidate,
             JobOpening,
             User,

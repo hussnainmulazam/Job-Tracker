@@ -1,4 +1,5 @@
-# FastAPI Backend (Job Tracker)
+# Hiring Loop Backend (FastAPI)
+> Hire faster, with you in control.
 
 A production-ready FastAPI backend built with SQLModel, PostgreSQL (Neon / Supabase), Pydantic Settings, JWT Authentication, and AI-powered services (Google Gemini / Groq free tier).
 

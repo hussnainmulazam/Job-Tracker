@@ -189,43 +189,40 @@ class OutreachService:
                     draft_body = parts[2].strip() if len(parts) > 2 else parts[1].strip()
 
         except Exception as exc:
-            logger.warning("AI drafting router exception (%s). Using high-quality heuristic fallback.", exc)
-            if lang_clean == "hinglish":
-                if channel_clean == "whatsapp":
-                    draft_body = (
-                        f"Hi {candidate.name}! Humne aapka profile review kiya for {opening.title} role aur aapka experience in {skills_text} really impressed us. "
-                        f"Hum aapse short discussion karna chahte hain. Please is link se convenient time slot book kar lijiye: {scheduling_url}\n\n"
-                        f"Looking forward to connecting!"
-                    )
-                else:
-                    subject = f"Discussion regarding {opening.title} role at our team"
-                    draft_body = (
-                        f"Hi {candidate.name},\n\n"
-                        f"Aapka profile review karne ke baad we are very excited about your background in {skills_text}. "
-                        f"Hum aapse {opening.title} position ke baare mein baat karna chahte hain.\n\n"
-                        f"Aap apne convenience ke according neeche diye gaye scheduling link se interview slot book kar sakte hain:\n"
-                        f"{scheduling_url}\n\n"
-                        f"Looking forward to speaking with you!\n\n"
-                        f"Best regards,\nRecruiting Team"
-                    )
-            else:
-                if channel_clean == "whatsapp":
-                    draft_body = (
-                        f"Hi {candidate.name}! We came across your background and were impressed by your expertise in {skills_text}. "
-                        f"We would love to discuss the {opening.title} opportunity with you. "
-                        f"Please select a convenient time for a chat here: {scheduling_url}\n\n"
-                        f"Looking forward to speaking!"
-                    )
-                else:
-                    subject = f"Interview Invitation: {opening.title}"
-                    draft_body = (
-                        f"Hi {candidate.name},\n\n"
-                        f"Thank you for considering opportunities with us. We reviewed your profile and were especially impressed by your experience with {skills_text}.\n\n"
-                        f"We would love to invite you for an interview for the {opening.title} role. Please use the link below to select a time that fits your schedule:\n"
-                        f"{scheduling_url}\n\n"
-                        f"Looking forward to our conversation.\n\n"
-                        f"Best regards,\nRecruiting Team"
-                    )
+            logger.warning("AI drafting router exception (%s). Loading template from DB.", exc)
+            from app.services.template_service import render_user_template
+            ctx = {
+                "candidate_name": candidate.name,
+                "role": opening.title if opening else "Position",
+                "company": "Our Company",
+                "hr_name": "Recruiting Team",
+                "schedule_link": scheduling_url,
+                "meet_link": "",
+                "interview_date": "",
+                "interview_time": "",
+                "job_details": "",
+            }
+            try:
+                from app.models.onboarding import OnboardingSetup
+                onboarding = session.exec(
+                    select(OnboardingSetup).where(OnboardingSetup.user_id == user_id)
+                ).first()
+                if onboarding:
+                    if onboarding.company_name:
+                        ctx["company"] = onboarding.company_name
+                    if onboarding.hr_name:
+                        ctx["hr_name"] = onboarding.hr_name
+            except Exception:
+                pass
+
+            sub, _, draft_body, _ = render_user_template(
+                session=session,
+                user_id=user_id,
+                template_id="initial_interview",
+                context=ctx,
+            )
+            if channel_clean == "email":
+                subject = sub
 
         # 4. Save to messages table with hr_approved=False
         now_utc = datetime.now(timezone.utc)

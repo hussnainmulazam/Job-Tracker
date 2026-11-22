@@ -172,12 +172,12 @@ export function AppShell({
               <img
                 src="/brand/hiring-loop-logo.svg"
                 alt="Hiring Loop"
-                className="h-8 w-auto dark:hidden block object-contain"
+                className="h-7 w-auto max-w-[145px] dark:hidden block object-contain"
               />
               <img
                 src="/brand/hiring-loop-logo-dark.svg"
                 alt="Hiring Loop"
-                className="h-8 w-auto hidden dark:block object-contain"
+                className="h-7 w-auto max-w-[145px] hidden dark:block object-contain"
               />
             </Link>
           )}
@@ -442,12 +442,12 @@ export function AppShell({
                   <img
                     src="/brand/hiring-loop-logo.svg"
                     alt="Hiring Loop"
-                    className="h-7 w-auto dark:hidden block object-contain"
+                    className="h-7 w-auto max-w-[145px] dark:hidden block object-contain"
                   />
                   <img
                     src="/brand/hiring-loop-logo-dark.svg"
                     alt="Hiring Loop"
-                    className="h-7 w-auto hidden dark:block object-contain"
+                    className="h-7 w-auto max-w-[145px] hidden dark:block object-contain"
                   />
                 </Link>
                 <Button

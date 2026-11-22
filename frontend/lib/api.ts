@@ -1864,4 +1864,53 @@ export const pipelineAgentApi = {
     ),
 };
 
+export interface RecruitingTemplateModel {
+  id: string;
+  user_id: string;
+  stage_key: string;
+  name: string;
+  description?: string | null;
+  subject: string;
+  body: string;
+  is_active: boolean;
+  is_default: boolean;
+  is_custom: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const recruitingTemplatesApi = {
+  list: () => api.get<RecruitingTemplateModel[]>("/api/v1/recruiting-templates"),
+  create: (data: {
+    stage_key: string;
+    name: string;
+    description?: string;
+    subject: string;
+    body: string;
+    is_active?: boolean;
+    is_default?: boolean;
+    is_custom?: boolean;
+  }) => api.post<RecruitingTemplateModel>("/api/v1/recruiting-templates", data),
+  update: (id: string, data: Partial<RecruitingTemplateModel>) =>
+    api.put<RecruitingTemplateModel>(`/api/v1/recruiting-templates/${id}`, data),
+  duplicate: (id: string) =>
+    api.post<RecruitingTemplateModel>(`/api/v1/recruiting-templates/${id}/duplicate`),
+  toggle: (id: string) =>
+    api.post<RecruitingTemplateModel>(`/api/v1/recruiting-templates/${id}/toggle`),
+  setDefault: (id: string) =>
+    api.post<RecruitingTemplateModel>(`/api/v1/recruiting-templates/${id}/set-default`),
+  delete: (id: string) =>
+    api.delete(`/api/v1/recruiting-templates/${id}`),
+  batchSave: (templates: Record<string, { id?: string; subject: string; body: string; name?: string; is_active?: boolean }>) =>
+    api.post<{ message: string; count: number }>("/api/v1/recruiting-templates/batch", { templates }),
+  regenerate: (data?: { single_template_key?: string }) =>
+    api.post<{
+      templates: Record<string, { name: string; subject: string; body: string }>;
+      success: boolean;
+      model_used: string;
+      latency_seconds: number;
+    }>("/api/v1/recruiting-templates/regenerate", data || {}),
+};
+
+
 

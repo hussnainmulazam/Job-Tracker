@@ -166,25 +166,55 @@ def dispatch_pipeline_template_email(
         )
         return False, f"Email '{template_id}' was already sent (idempotency skipped).", None
 
-    # 2. Render template from DB (single source of truth)
+    # 2. Render template strictly from DB (single source of truth)
     try:
-        from app.services.template_service import render_user_template
+        from app.services.template_service import (
+            render_user_template,
+            TemplateMissingOrDisabledError,
+            MissingTemplateVariablesError,
+        )
         subject, html_body, text_body, preheader = render_user_template(
             session=session,
             user_id=user_id,
             template_id=template_id,
             context=context,
         )
-    except Exception as db_err:
-        logger.info("Falling back to registry template rendering for %s: %s", template_id, db_err)
+    except TemplateMissingOrDisabledError as tm_err:
+        pause_msg = f"Template missing: {getattr(tm_err, 'stage_name', template_id)}. Configure at /settings?tab=templates"
+        logger.warning("Pipeline email blocked: %s", pause_msg)
         try:
-            subject, html_body, text_body, preheader = render_template(template_id, context)
-        except MissingTemplateVariablesError as err:
-            logger.error("Missing template variables for %s: %s", template_id, err)
-            return False, str(err), None
-        except Exception as exc:
-            logger.exception("Error rendering template %s: %s", template_id, exc)
-            return False, str(exc), None
+            from app.services.pipeline_agent_service import set_candidate_pipeline_status, PipelineStatus
+            set_candidate_pipeline_status(
+                session=session,
+                candidate=candidate,
+                new_status=PipelineStatus.NEEDS_ATTENTION,
+                action_taken=pause_msg,
+                result="paused",
+                next_pending_action="Configure template in Settings > Recruiting Templates",
+            )
+        except Exception as pe:
+            logger.debug("Could not record pipeline pause status: %s", pe)
+        return False, pause_msg, None
+    except MissingTemplateVariablesError as mv_err:
+        pause_msg = f"Missing variable in template: {mv_err}. Configure at /settings?tab=templates"
+        logger.warning("Pipeline email blocked and HR flagged: %s", pause_msg)
+        try:
+            from app.services.pipeline_agent_service import set_candidate_pipeline_status, PipelineStatus
+            set_candidate_pipeline_status(
+                session=session,
+                candidate=candidate,
+                new_status=PipelineStatus.NEEDS_ATTENTION,
+                action_taken=pause_msg,
+                result="paused",
+                next_pending_action="Resolve missing variables or edit template in Settings",
+            )
+        except Exception as pe:
+            logger.debug("Could not record pipeline pause status: %s", pe)
+        return False, pause_msg, None
+    except Exception as exc:
+        pause_msg = f"Template missing or render error: {exc}. Configure at /settings?tab=templates"
+        logger.exception("Error rendering template %s: %s", template_id, exc)
+        return False, pause_msg, None
 
     # 3. Check time-of-day window (8:00 - 20:00) unless it's confirmation or reminder or forced
     urgent_templates = {

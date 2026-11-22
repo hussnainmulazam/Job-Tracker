@@ -437,6 +437,45 @@ def save_step_4(
     onboarding.templates = raw_templates
     onboarding.step_4_completed = True
 
+    # Sync to recruiting_templates table (Single source of truth)
+    try:
+        from app.models.recruiting_template import RecruitingTemplate
+        from app.services.template_service import TEMPLATE_CONFIGS
+        existing = session.exec(
+            select(RecruitingTemplate).where(RecruitingTemplate.user_id == current_user.id)
+        ).all()
+        by_stage = {t.stage_key: t for t in existing if t.is_default}
+        now_ts = datetime.now(timezone.utc)
+        for key, data in raw_templates.items():
+            tmpl = by_stage.get(key)
+            if tmpl:
+                tmpl.subject = data.get("subject", tmpl.subject).strip()
+                tmpl.body = data.get("body", tmpl.body).strip()
+                if data.get("name"):
+                    tmpl.name = data["name"].strip()
+                if "is_active" in data:
+                    tmpl.is_active = bool(data["is_active"])
+                tmpl.updated_at = now_ts
+                session.add(tmpl)
+            else:
+                cfg = TEMPLATE_CONFIGS.get(key, {})
+                new_t = RecruitingTemplate(
+                    user_id=current_user.id,
+                    stage_key=key,
+                    name=data.get("name") or cfg.get("name", key.replace("_", " ").title()),
+                    description=cfg.get("description", ""),
+                    subject=data.get("subject", "").strip(),
+                    body=data.get("body", "").strip(),
+                    is_active=data.get("is_active", True),
+                    is_default=True,
+                    is_custom=False,
+                    created_at=now_ts,
+                    updated_at=now_ts,
+                )
+                session.add(new_t)
+    except Exception as exc:
+        logger.warning("Error syncing onboarding templates to recruiting_templates table: %s", exc)
+
     _check_and_update_all_done(onboarding)
 
     onboarding.updated_at = datetime.now(timezone.utc)

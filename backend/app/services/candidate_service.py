@@ -743,10 +743,10 @@ class CandidateService:
         job_title = opening.title if opening else "Position"
 
         from app.services.pipeline_agent_service import build_pipeline_context
-        from app.services.pipeline_template_service import render_template
+        from app.services.template_service import render_user_template
 
         ctx = build_pipeline_context(session, user_id, candidate)
-        subject, html_body, body, _ = render_template("cv_received", ctx)
+        subject, html_body, body, _ = render_user_template(session, user_id, "cv_received", ctx)
 
         from app.services.google_service import GoogleService
         from app.schemas.google import GoogleSendEmailRequest
@@ -869,17 +869,13 @@ class CandidateService:
             )
             booking_url = sched_link.booking_url
 
-            subject = f"Application Approved: Interview Invitation for {job_title}"
-            body = (
-                f"Dear {candidate.name},\n\n"
-                f"Congratulations! We are delighted to inform you that your application for the {job_title} position has been reviewed and approved by our team.\n\n"
-                f"We would love to invite you for an interview. Please select a convenient time slot that works best for your schedule using your personal scheduling link:\n\n"
-                f"{booking_url}\n\n"
-                f"If you have any questions before the interview, simply reply to this email.\n\n"
-                f"Looking forward to speaking with you!\n\n"
-                f"Best regards,\n"
-                f"Recruiting & Talent Acquisition Team"
-            )
+            from app.services.pipeline_agent_service import build_pipeline_context
+            from app.services.template_service import render_user_template
+
+            ctx = build_pipeline_context(session, user_id, candidate)
+            ctx["schedule_link"] = booking_url
+            ctx["booking_link"] = booking_url
+            subject, html_body, body, _ = render_user_template(session, user_id, "cv_passed", ctx)
 
             google_svc = GoogleService(session)
             google_svc.send_email(

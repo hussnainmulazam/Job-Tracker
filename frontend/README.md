@@ -1,6 +1,7 @@
-# Job Tracker Frontend (Next.js 15 + Tailwind + shadcn/ui)
+# Hiring Loop Frontend (Next.js 15 + Tailwind + shadcn/ui)
+> Hire faster, with you in control.
 
-A modern, responsive frontend for the Job Tracker application built with Next.js 15 App Router, TypeScript, Tailwind CSS, shadcn/ui, TanStack Query v5, and Zod + React Hook Form.
+A modern, responsive frontend for Hiring Loop built with Next.js 15 App Router, TypeScript, Tailwind CSS, shadcn/ui, TanStack Query v5, and Zod + React Hook Form.
 
 ---
 

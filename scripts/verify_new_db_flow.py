@@ -39,7 +39,7 @@ def run_verification():
     print("  -> /health/db PASSED!")
 
     # 2. Register a new user
-    test_email = f"recruiter_{int(time.time())}@talentflow.ai"
+    test_email = f"recruiter_{int(time.time())}@hiringloop.ai"
     test_password = "RecruiterStrongPassword123!"
     print(f"\n[Step 2] Testing /register with: {test_email} ...")
     reg_resp = client.post(

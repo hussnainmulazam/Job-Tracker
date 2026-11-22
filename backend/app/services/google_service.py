@@ -1245,23 +1245,16 @@ class GoogleService:
         tmpl = request.template_name.lower()
         if tmpl in ("custom", ""):
             subject = request.custom_subject or f"Regarding your application for {role_name}"
-            body = request.custom_body or f"Hi {candidate.name},\n\nThank you for your interest in {company_name}."
+            body = request.custom_body or f"Regarding your application for {role_name} at {company_name}."
             subject = fill_template_variables(subject, variables)
             body = fill_template_variables(body, variables)
         else:
-            try:
-                subject, html_body, body, _ = render_user_template(
-                    session=self.session,
-                    user_id=user_id,
-                    template_id=tmpl,
-                    context=variables,
-                )
-            except Exception as render_err:
-                logger.warning("Could not render template %s from DB: %s. Using custom fallback.", tmpl, render_err)
-                subject = request.custom_subject or f"Regarding your application for {role_name}"
-                body = request.custom_body or f"Hi {candidate.name},\n\nThank you for your interest in {company_name}."
-                subject = fill_template_variables(subject, variables)
-                body = fill_template_variables(body, variables)
+            subject, html_body, body, _ = render_user_template(
+                session=self.session,
+                user_id=user_id,
+                template_id=tmpl,
+                context=variables,
+            )
 
         return GooglePreviewEmailResponse(
             candidate_id=candidate.id,
