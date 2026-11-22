@@ -77,7 +77,8 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-LOCAL_UPLOAD_DIR = Path("uploads/cvs")
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+LOCAL_UPLOAD_DIR = BACKEND_DIR / "uploads" / "cvs"
 LOCAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 

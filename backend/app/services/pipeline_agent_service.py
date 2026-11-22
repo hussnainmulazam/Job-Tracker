@@ -36,7 +36,6 @@ from app.models.audit_log import AuditLog
 from app.services.pipeline_template_service import (
     dispatch_pipeline_template_email,
     is_email_already_sent,
-    render_template,
 )
 from app.services.scheduling_service import SchedulingService
 

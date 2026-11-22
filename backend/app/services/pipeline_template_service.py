@@ -21,92 +21,14 @@ from sqlmodel import Session, select
 from app.models.candidate import Candidate
 from app.models.message import Message, MessageDirection, MessageType, MessageStatus
 from app.models.audit_log import AuditLog
+from app.services.template_service import (
+    render_user_template,
+    MissingTemplateVariablesError,
+    TemplateMissingOrDisabledError,
+    TemplateNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
-
-# Determine templates path
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TEMPLATES_DIR = os.path.abspath(os.path.join(BACKEND_DIR, "..", "templates"))
-REGISTRY_PATH = os.path.join(TEMPLATES_DIR, "registry.json")
-
-_REGISTRY_CACHE: Optional[Dict[str, Any]] = None
-
-
-def get_registry() -> Dict[str, Any]:
-    global _REGISTRY_CACHE
-    if _REGISTRY_CACHE is not None:
-        return _REGISTRY_CACHE
-    if not os.path.exists(REGISTRY_PATH):
-        raise FileNotFoundError(f"Template registry not found at {REGISTRY_PATH}")
-    with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
-        _REGISTRY_CACHE = json.load(f)
-    return _REGISTRY_CACHE
-
-
-class MissingTemplateVariablesError(Exception):
-    """Raised when a template is invoked without all required variables declared in registry.json."""
-    pass
-
-
-class TemplateNotFoundError(Exception):
-    """Raised when an unknown template_id is requested."""
-    pass
-
-
-def render_template(template_id: str, context: Dict[str, Any]) -> Tuple[str, str, str, str]:
-    """
-    Renders a registered template using deterministic variable substitution.
-    Returns: (subject, html_content, text_content, preheader)
-    """
-    registry = get_registry()
-    templates = registry.get("templates", {})
-    if template_id not in templates:
-        raise TemplateNotFoundError(
-            f"Template '{template_id}' is not in registry.json. Available: {list(templates.keys())}"
-        )
-
-    meta = templates[template_id]
-    required_vars: Set[str] = set(meta.get("required_variables", []))
-
-    # Verify all required variables are supplied
-    missing = [v for v in required_vars if v not in context or context[v] is None]
-    if missing:
-        raise MissingTemplateVariablesError(
-            f"Cannot render '{template_id}'. Missing required variables: {missing}"
-        )
-
-    # Load HTML and TXT files
-    html_file = os.path.join(TEMPLATES_DIR, f"{template_id}.html")
-    txt_file = os.path.join(TEMPLATES_DIR, f"{template_id}.txt")
-
-    if not os.path.exists(html_file):
-        raise FileNotFoundError(f"HTML template missing: {html_file}")
-    if not os.path.exists(txt_file):
-        raise FileNotFoundError(f"TXT template missing: {txt_file}")
-
-    with open(html_file, "r", encoding="utf-8") as f:
-        html_raw = f.read()
-    with open(txt_file, "r", encoding="utf-8") as f:
-        txt_raw = f.read()
-
-    # Preheader and subject substitution
-    subject_raw = meta.get("subject", "")
-    preheader_raw = meta.get("preheader", "")
-
-    # Perform pure deterministic substitution ({{var}} -> str(val))
-    def substitute(text: str) -> str:
-        for k, v in context.items():
-            placeholder = f"{{{{{k}}}}}"
-            if placeholder in text:
-                text = text.replace(placeholder, str(v) if v is not None else "")
-        return text
-
-    subject = substitute(subject_raw)
-    html_rendered = substitute(html_raw)
-    txt_rendered = substitute(txt_raw)
-    preheader = substitute(preheader_raw)
-
-    return subject, html_rendered, txt_rendered, preheader
 
 
 def is_email_already_sent(
