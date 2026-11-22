@@ -1016,10 +1016,10 @@ export function AvailabilityTab() {
               <div className="bg-card border border-border/80 rounded-xl p-5 shadow-xs space-y-4">
                 <div className="flex items-center gap-3 pb-3 border-b border-border/50">
                   <div className="w-10 h-10 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center text-sm">
-                    TF
+                    HL
                   </div>
                   <div>
-                    <h3 className="text-xs font-semibold text-foreground">TalentFlow Hiring Team</h3>
+                    <h3 className="text-xs font-semibold text-foreground">Hiring Loop Team</h3>
                     <p className="text-[11px] text-muted-foreground">
                       Screening Interview ({slotDuration} minutes)
                     </p>

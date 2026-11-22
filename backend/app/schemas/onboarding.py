@@ -123,7 +123,7 @@ class TemplatePreviewRequest(BaseModel):
     interview_date: Optional[str] = Field(default="Thursday, Nov 26")
     interview_time: Optional[str] = Field(default="2:30 PM PKT")
     meet_link: Optional[str] = Field(default="https://meet.google.com/abc-defg-hij")
-    schedule_link: Optional[str] = Field(default="https://app.talentflow.ai/schedule/invite-demo")
+    schedule_link: Optional[str] = Field(default="https://app.hiringloop.ai/schedule/invite-demo")
     job_details: Optional[str] = Field(
         default="Architecting microservices in Python, designing schemas in PostgreSQL, and deploying cloud containers."
     )

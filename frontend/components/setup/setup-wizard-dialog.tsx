@@ -1293,10 +1293,10 @@ export function SetupWizardDialog({
                   interview_date: "Thursday, Nov 26",
                   interview_time: "2:30 PM PKT",
                   meet_link: "https://meet.google.com/abc-defg-hij",
-                  schedule_link: "https://app.talentflow.ai/schedule/invite-demo",
+                  schedule_link: "https://app.hiringloop.ai/schedule/invite-demo",
                   job_details:
                     "Designing scalable microservices, creating high-performance PostgreSQL queries, and deploying cloud services.",
-                  booking_link: "https://app.talentflow.ai/schedule/invite-demo",
+                  booking_link: "https://app.hiringloop.ai/schedule/invite-demo",
                   job_title: jobTitle || "Senior Software Engineer",
                   company_name: companyName || "Our Company",
                   signature: signature || `Warm regards,\n${hrName || "Talent Lead"}\n${companyName || "Our Company"}`,

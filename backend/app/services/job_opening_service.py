@@ -16,6 +16,7 @@ from app.schemas.job_opening import (
     PaginatedJobOpenings,
 )
 from app.services.ai import extract_job_requirements
+from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,12 @@ class JobOpeningService:
         session.commit()
         session.refresh(opening)
 
+        # Invalidate requisition list cache for this recruiter
+        cache_service.delete_prefix(f"requisition:list:{user_id}")
+
         read = JobOpeningRead.model_validate(opening)
         read.candidates_count = 0
+        cache_service.set(f"requisition:detail:{opening.id}", read.model_dump(), ttl=180)
         return read
 
     def get_by_id(
@@ -91,12 +96,18 @@ class JobOpeningService:
         user_id: uuid.UUID,
         opening_id: uuid.UUID,
     ) -> JobOpeningRead:
+        cache_key = f"requisition:detail:{opening_id}"
+        cached = cache_service.get(cache_key)
+        if cached is not None:
+            return JobOpeningRead.model_validate(cached)
+
         opening = self.get_by_id(session, user_id, opening_id)
         count_stmt = select(func.count(Candidate.id)).where(Candidate.opening_id == opening_id)
         candidates_count = session.exec(count_stmt).one() or 0
 
         read = JobOpeningRead.model_validate(opening)
         read.candidates_count = candidates_count
+        cache_service.set(cache_key, read.model_dump(), ttl=180)
         return read
 
     def list(
@@ -178,6 +189,10 @@ class JobOpeningService:
         session.commit()
         session.refresh(opening)
 
+        # Invalidate requisition detail and list caches
+        cache_service.delete(f"requisition:detail:{opening.id}")
+        cache_service.delete_prefix(f"requisition:list:{user_id}")
+
         return self.get_read_by_id(session, user_id, opening.id)
 
     def delete(
@@ -189,6 +204,10 @@ class JobOpeningService:
         opening = self.get_by_id(session, user_id, opening_id)
         session.delete(opening)
         session.commit()
+
+        # Invalidate requisition detail and list caches
+        cache_service.delete(f"requisition:detail:{opening_id}")
+        cache_service.delete_prefix(f"requisition:list:{user_id}")
 
 
 job_opening_service = JobOpeningService()

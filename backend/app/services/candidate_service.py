@@ -1247,6 +1247,20 @@ class CandidateService:
         session.commit()
         session.refresh(candidate)
 
+        # Optional Pinecone vector indexing (runs ONLY if PINECONE_API_KEY and PINECONE_INDEX are configured)
+        try:
+            from app.services.vector_service import vector_service
+            if vector_service.is_enabled():
+                vector_service.index_candidate_cv(
+                    candidate_id=str(candidate.id),
+                    candidate_name=candidate.name,
+                    cv_text=cv_raw,
+                    opening_id=str(candidate.opening_id),
+                    score=result["score"],
+                )
+        except Exception as exc:
+            logger.debug("Optional Pinecone vector indexing skipped/failed: %s", exc)
+
         # Populate in-memory cache
         _SCREENING_CACHE[cache_key] = result
 

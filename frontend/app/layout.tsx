@@ -3,8 +3,18 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "Job Tracker | AI-Powered Job Search",
-  description: "Track your job applications, tailor your CV with AI, and prepare for interviews.",
+  title: "Hiring Loop | Hire faster, with you in control",
+  description: "Hire faster, with you in control. AI Candidate Screening Copilot.",
+  icons: {
+    icon: [
+      { url: "/brand/favicon.svg", type: "image/svg+xml" },
+      { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/brand/favicon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    shortcut: "/brand/favicon.svg",
+    apple: "/brand/favicon-192.png",
+  },
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({

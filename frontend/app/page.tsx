@@ -21,15 +21,18 @@ export default function LandingPage() {
       {/* Navbar */}
       <header className="border-b border-border bg-card/60 backdrop-blur-md sticky top-0 z-40">
         <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="h-7 w-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-xs shadow-xs">
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div className="flex flex-col">
-              <span className="font-extrabold text-sm tracking-tight text-foreground leading-none">TalentFlow</span>
-              <span className="text-[10px] text-muted-foreground font-semibold leading-tight mt-0.5">Recruiting AI Copilot</span>
-            </div>
-          </div>
+          <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
+            <img
+              src="/brand/hiring-loop-logo.svg"
+              alt="Hiring Loop"
+              className="h-8 w-auto dark:hidden block object-contain"
+            />
+            <img
+              src="/brand/hiring-loop-logo-dark.svg"
+              alt="Hiring Loop"
+              className="h-8 w-auto hidden dark:block object-contain"
+            />
+          </Link>
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
@@ -51,7 +54,7 @@ export default function LandingPage() {
       <main className="flex-1 container mx-auto px-4 flex flex-col items-center justify-center py-16 text-center max-w-3xl">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary text-xs font-semibold mb-6">
           <Sparkles className="h-3.5 w-3.5" />
-          <span>AI Candidate Screening & Shortlist Intelligence</span>
+          <span>Hire faster, with you in control.</span>
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-foreground leading-tight sm:leading-tight">
@@ -113,7 +116,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-border py-4 text-center text-xs text-muted-foreground">
         <div className="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span className="font-medium">TalentFlow — AI Candidate Screening Copilot</span>
+          <span className="font-medium">Hiring Loop — Hire faster, with you in control.</span>
           <div className="flex items-center gap-4 text-[11px]">
             <span>FastAPI</span>
             <span>•</span>

@@ -75,19 +75,31 @@ class VectorService:
         try:
             from pinecone import Pinecone
             self._client = Pinecone(api_key=api_key.strip())
-            # Check or attach to index
-            self._index = self._client.Index(index_name.strip())
+            self._index_name = index_name.strip()
             self._enabled = True
-            logger.info("Pinecone vector service enabled and connected to index: %s", index_name)
+            logger.info("Pinecone vector service enabled with index target: %s", index_name)
         except Exception as exc:
             self._enabled = False
             self._client = None
             self._index = None
-            logger.warning("Pinecone initialized but index connection failed: %s. Vector service disabled.", exc)
+            logger.warning("Pinecone client initialization failed: %s. Vector service disabled.", exc)
+
+    def _get_index(self):
+        """Lazily connects to the Pinecone index with error protection."""
+        if not self._enabled or not self._client:
+            return None
+        if self._index is not None:
+            return self._index
+        try:
+            self._index = self._client.Index(self._index_name)
+            return self._index
+        except Exception as exc:
+            logger.warning("Pinecone index connection failed: %s", exc)
+            return None
 
     def is_enabled(self) -> bool:
         """Returns True only if Pinecone is configured and ready."""
-        return self._enabled and self._index is not None
+        return self._enabled and self._client is not None
 
     def _get_embedding(self, text: str) -> List[float]:
         """
@@ -133,7 +145,8 @@ class VectorService:
         Embeds a candidate's CV and indexes the vector in Pinecone for semantic matching & similarity search.
         Never stores private authentication credentials.
         """
-        if not self.is_enabled():
+        idx = self._get_index()
+        if not idx:
             return False
 
         if not cv_text or not cv_text.strip():
@@ -149,7 +162,7 @@ class VectorService:
                 "cv_snippet": cv_text[:300].strip(),
             }
 
-            self._index.upsert(
+            idx.upsert(
                 vectors=[
                     {
                         "id": f"cand_{candidate_id}",
@@ -205,13 +218,14 @@ class VectorService:
         Finds candidates with similar background/skills based on Pinecone vector cosine similarity.
         Returns empty list if Pinecone is disabled.
         """
-        if not self.is_enabled():
+        idx = self._get_index()
+        if not idx:
             return []
 
         vec_id = f"cand_{candidate_id}"
         try:
             # Query by vector id
-            fetch_res = self._index.fetch(ids=[vec_id])
+            fetch_res = idx.fetch(ids=[vec_id])
             vectors = getattr(fetch_res, "vectors", {}) or {}
             cand_vector_data = vectors.get(vec_id)
 
@@ -220,7 +234,7 @@ class VectorService:
                 return []
 
             target_vector = cand_vector_data.values
-            query_res = self._index.query(
+            query_res = idx.query(
                 vector=target_vector,
                 top_k=top_k + 1,
                 include_metadata=True,

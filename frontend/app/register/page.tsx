@@ -129,14 +129,23 @@ function RegisterForm() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <Card className="w-full max-w-md shadow-card border-border/70 dark:border-white/[0.08] rounded-2xl bg-card">
         <CardHeader className="space-y-2 text-center pb-6">
-          <div className="mx-auto h-11 w-11 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shadow-xs mb-1">
-            <Briefcase className="h-5 w-5" />
+          <div className="flex flex-col items-center justify-center mb-1">
+            <img
+              src="/brand/hiring-loop-logo.svg"
+              alt="Hiring Loop"
+              className="h-9 w-auto dark:hidden block object-contain"
+            />
+            <img
+              src="/brand/hiring-loop-logo-dark.svg"
+              alt="Hiring Loop"
+              className="h-9 w-auto hidden dark:block object-contain"
+            />
           </div>
           <CardTitle className="text-xl font-bold tracking-tight text-foreground">
             Create an account
           </CardTitle>
           <CardDescription className="text-xs text-muted-foreground">
-            Start tracking job applications and tailoring candidate intake
+            Hire faster, with you in control.
           </CardDescription>
         </CardHeader>
 

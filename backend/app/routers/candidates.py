@@ -446,6 +446,34 @@ async def generate_screening_questions(
     )
 
 
+@router.get(
+    "/{candidate_id}/similar",
+    summary="Find similar candidates using vector similarity (Pinecone)",
+)
+def find_similar_candidates(
+    candidate_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+    top_k: int = Query(default=5, ge=1, le=20),
+):
+    """
+    Finds candidates with similar background and qualifications using Pinecone vector embeddings.
+    If Pinecone is disabled or not configured in .env, returns an empty list gracefully.
+    """
+    from app.services.vector_service import vector_service
+
+    # Validate candidate exists for this recruiter
+    candidate_service.get_by_id(session, current_user.id, candidate_id)
+
+    similar = vector_service.find_similar_candidates(str(candidate_id), top_k=top_k)
+    return {
+        "candidate_id": str(candidate_id),
+        "vector_service_enabled": vector_service.is_enabled(),
+        "count": len(similar),
+        "similar_candidates": similar,
+    }
+
+
 # ── Contact & Profile Link Extraction ─────────────────────────────────────────
 
 @router.post(

@@ -620,7 +620,7 @@ def preview_template_endpoint(
         "interview_date": payload.interview_date or "Thursday, Nov 26",
         "interview_time": payload.interview_time or "2:30 PM PKT",
         "meet_link": payload.meet_link or "https://meet.google.com/abc-defg-hij",
-        "schedule_link": payload.schedule_link or "https://app.talentflow.ai/schedule/invite-demo",
+        "schedule_link": payload.schedule_link or "https://app.hiringloop.ai/schedule/invite-demo",
         "job_details": payload.job_details or "Architecting backend microservices and designing schemas.",
     }
 

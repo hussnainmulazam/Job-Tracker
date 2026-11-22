@@ -2,10 +2,15 @@
 
 import React, { useRef, useState, useMemo, useEffect } from "react";
 import FullCalendar from "@fullcalendar/react";
+import classicThemePlugin from "@fullcalendar/react/themes/classic";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
 import timeGridPlugin from "@fullcalendar/react/timegrid";
 import interactionPlugin from "@fullcalendar/react/interaction";
 import listPlugin from "@fullcalendar/react/list";
+
+import "@fullcalendar/react/skeleton.css";
+import "@fullcalendar/react/themes/classic/theme.css";
+import "@fullcalendar/react/themes/classic/palette.css";
 import {
   ChevronLeft,
   ChevronRight,
@@ -314,7 +319,7 @@ export default function GoogleCalendarComponent({
       <div className="fullcalendar-google-theme min-h-[640px]">
         <FullCalendarAny
           ref={calendarRef}
-          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
+          plugins={[classicThemePlugin, dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
           initialView="timeGridWeek"
           headerToolbar={false} // Managed via our custom toolbar above
           timeZone={data.time_zone || "local"}
@@ -360,19 +365,24 @@ export default function GoogleCalendarComponent({
           --fc-non-business-color: hsl(var(--muted) / 0.35);
         }
 
-        .fullcalendar-google-theme .fc-theme-standard th {
-          border-color: hsl(var(--border) / 0.6);
-          padding: 8px 0;
-          font-size: 11px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: hsl(var(--muted-foreground));
-          background: hsl(var(--muted) / 0.2);
+        .fullcalendar-google-theme th,
+        .fullcalendar-google-theme .fc-col-header-cell,
+        .fullcalendar-google-theme .fc-theme-standard th,
+        .fullcalendar-google-theme .fc-theme-classic th {
+          border-color: hsl(var(--border) / 0.6) !important;
+          padding: 8px 0 !important;
+          font-size: 11px !important;
+          font-weight: 700 !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.05em !important;
+          color: hsl(var(--muted-foreground)) !important;
+          background: hsl(var(--muted) / 0.2) !important;
         }
 
-        .fullcalendar-google-theme .fc-theme-standard td {
-          border-color: hsl(var(--border) / 0.5);
+        .fullcalendar-google-theme td,
+        .fullcalendar-google-theme .fc-theme-standard td,
+        .fullcalendar-google-theme .fc-theme-classic td {
+          border-color: hsl(var(--border) / 0.5) !important;
         }
 
         .fullcalendar-google-theme .fc-timegrid-slot {

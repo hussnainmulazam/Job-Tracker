@@ -650,7 +650,7 @@ function SettingsPageInner() {
             <Card className="border border-border/80 dark:border-white/[0.08] shadow-xs rounded-xl">
               <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="space-y-0.5">
-                  <span className="text-xs font-semibold text-foreground">Sign Out of TalentFlow</span>
+                  <span className="text-xs font-semibold text-foreground">Sign Out of Hiring Loop</span>
                   <p className="text-[11px] text-muted-foreground">
                     End your active session securely.
                   </p>
@@ -1197,10 +1197,10 @@ function SettingsPageInner() {
                 interview_date: "Thursday, Nov 26",
                 interview_time: "2:30 PM PKT",
                 meet_link: "https://meet.google.com/abc-defg-hij",
-                schedule_link: "https://app.talentflow.ai/schedule/invite-demo",
+                schedule_link: "https://app.hiringloop.ai/schedule/invite-demo",
                 job_details:
                   "Designing scalable microservices, creating high-performance PostgreSQL queries, and deploying cloud services.",
-                booking_link: "https://app.talentflow.ai/schedule/invite-demo",
+                booking_link: "https://app.hiringloop.ai/schedule/invite-demo",
                 job_title: onboardingData?.step_2?.job_title || "Senior Software Engineer",
                 company_name: hrInfo?.company_name || "Our Company",
                 signature:

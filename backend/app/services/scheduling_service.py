@@ -151,6 +151,10 @@ class SchedulingService:
 
         session.commit()
         session.refresh(schedule)
+        from app.services.cache_service import cache_service
+        cache_service.delete_prefix(f"calendar:events:{user_id}")
+        cache_service.delete(f"calendar:availability:{user_id}")
+        cache_service.delete_prefix("calendar:slots:")
         return schedule
 
     # ── 2. Scheduling Links ───────────────────────────────────────────────────
@@ -1310,7 +1314,7 @@ class SchedulingService:
             elif access_token and inv.status == InterviewStatus.scheduled and (not inv.google_calendar_event_id or inv.google_calendar_event_id.startswith("cal_evt_")):
                 try:
                     summary = f"Interview: {inv.candidate_name} - {inv.title}"
-                    desc = f"Interview with {inv.candidate_name} ({inv.candidate_email}) via TalentFlow."
+                    desc = f"Interview with {inv.candidate_name} ({inv.candidate_email}) via Hiring Loop."
                     cal_id, meet_link = await self.create_google_calendar_event(
                         session=session,
                         user_id=user_id,

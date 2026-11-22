@@ -167,25 +167,32 @@ export function AppShell({
           {!collapsed && (
             <Link
               href="/dashboard"
-              className="flex items-center gap-2.5 font-bold text-sm tracking-tight hover:opacity-90 transition-opacity"
+              className="flex items-center gap-2 hover:opacity-90 transition-opacity px-1"
             >
-              <div className="h-7 w-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-black text-xs shadow-xs">
-                <Sparkles className="h-4 w-4" />
-              </div>
-              <div className="flex flex-col">
-                <span className="truncate leading-none text-foreground font-extrabold">TalentFlow</span>
-                <span className="text-[10px] text-muted-foreground font-semibold leading-tight mt-0.5">Recruiting AI Copilot</span>
-              </div>
+              <img
+                src="/brand/hiring-loop-logo.svg"
+                alt="Hiring Loop"
+                className="h-8 w-auto dark:hidden block object-contain"
+              />
+              <img
+                src="/brand/hiring-loop-logo-dark.svg"
+                alt="Hiring Loop"
+                className="h-8 w-auto hidden dark:block object-contain"
+              />
             </Link>
           )}
 
           {collapsed && (
             <Link
               href="/dashboard"
-              className="mx-auto h-7 w-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-xs shadow-xs"
-              title="TalentFlow Copilot"
+              className="mx-auto flex items-center justify-center hover:opacity-90 transition-opacity"
+              title="Hiring Loop — Hire faster, with you in control."
             >
-              <Sparkles className="h-4 w-4" />
+              <img
+                src="/brand/favicon.svg"
+                alt="Hiring Loop"
+                className="h-7 w-7 rounded-lg object-contain"
+              />
             </Link>
           )}
 
@@ -427,12 +434,22 @@ export function AppShell({
               className="relative w-64 max-w-[80vw] bg-card border-r border-border h-full flex flex-col p-4 shadow-xl z-50"
             >
               <div className="flex items-center justify-between pb-4 border-b border-border">
-                <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-xs">
-                    <Sparkles className="h-4 w-4" />
-                  </div>
-                  <span className="font-bold text-sm text-foreground">TalentFlow</span>
-                </div>
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center gap-2 hover:opacity-90 transition-opacity"
+                >
+                  <img
+                    src="/brand/hiring-loop-logo.svg"
+                    alt="Hiring Loop"
+                    className="h-7 w-auto dark:hidden block object-contain"
+                  />
+                  <img
+                    src="/brand/hiring-loop-logo-dark.svg"
+                    alt="Hiring Loop"
+                    className="h-7 w-auto hidden dark:block object-contain"
+                  />
+                </Link>
                 <Button
                   variant="ghost"
                   size="sm"
