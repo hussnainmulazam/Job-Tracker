@@ -30,7 +30,6 @@ from app.schemas.candidate import (
     CandidateUpdate,
     PaginatedCandidates,
 )
-from app.schemas.scorecard import ScorecardRead
 from app.schemas.extractor import CandidateLinkRead
 from app.schemas.message import MessageRead
 from app.schemas.scheduling import InterviewRead, SchedulingLinkRead
@@ -472,15 +471,9 @@ class CandidateService:
             select(JobOpening).where(JobOpening.id == candidate.opening_id)
         ).first()
 
-        scorecards = session.exec(
-            select(Scorecard)
-            .where(Scorecard.candidate_id == candidate_id)
-            .order_by(Scorecard.created_at.desc())
-        ).all()
-
         read = CandidateRead.model_validate(candidate)
         read.opening_title = opening.title if opening else None
-        read.scorecards = [ScorecardRead.model_validate(s) for s in scorecards]
+        read.scorecards = []
         return read
 
     def list(
@@ -934,17 +927,7 @@ class CandidateService:
         cand_name = candidate.name
         op_id = candidate.opening_id
 
-        # 1. Cascade delete Scorecards
-        scorecards = session.exec(
-            select(Scorecard).where(
-                Scorecard.candidate_id == candidate_id,
-                Scorecard.user_id == user_id,
-            )
-        ).all()
-        for sc in scorecards:
-            session.delete(sc)
-
-        # 2. Cascade delete CandidateLinks
+        # 1. Cascade delete CandidateLinks
         links = session.exec(
             select(CandidateLink).where(
                 CandidateLink.candidate_id == candidate_id,
@@ -1039,14 +1022,8 @@ class CandidateService:
             for l in raw_links
         ]
 
-        # 2. Scorecards
-        raw_scorecards = session.exec(
-            select(Scorecard).where(
-                Scorecard.candidate_id == candidate_id,
-                Scorecard.user_id == user_id,
-            )
-        ).all()
-        scorecards = [ScorecardRead.model_validate(sc) for sc in raw_scorecards]
+        # 2. Scorecards (empty list placeholder for schema compatibility)
+        scorecards = []
 
         # 3. Communications / Messages
         raw_messages = session.exec(

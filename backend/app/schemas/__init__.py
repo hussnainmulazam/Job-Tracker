@@ -23,13 +23,6 @@ from app.schemas.candidate import (
     CandidateUpdate,
     PaginatedCandidates,
 )
-from app.schemas.scorecard import (
-    PaginatedScorecards,
-    ScorecardBase,
-    ScorecardCreate,
-    ScorecardRead,
-    ScorecardUpdate,
-)
 from app.schemas.ai import (
     AIModelsHealthResponse,
     CandidateScreenRequest,
@@ -78,12 +71,6 @@ __all__ = [
     "BulkScoreResponse",
     "CandidateScreeningQuestionsResponse",
     "PaginatedCandidates",
-    # Scorecards
-    "ScorecardBase",
-    "ScorecardCreate",
-    "ScorecardRead",
-    "ScorecardUpdate",
-    "PaginatedScorecards",
     # AI
     "CandidateScreenRequest",
     "CandidateScreenResponse",

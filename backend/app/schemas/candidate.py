@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.candidate import CandidateStage
-from app.schemas.scorecard import ScorecardRead
 from app.schemas.extractor import CandidateLinkRead
 from app.schemas.message import MessageRead
 from app.schemas.scheduling import InterviewRead, SchedulingLinkRead
@@ -121,7 +120,7 @@ class CandidateRead(BaseModel):
     auto_reply_sent_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-    scorecards: Optional[List[ScorecardRead]] = None
+    scorecards: Optional[List[Dict[str, Any]]] = None
     opening_title: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -185,7 +184,7 @@ class CandidateDataExportResponse(BaseModel):
     """
     candidate: CandidateRead
     links: List[CandidateLinkRead] = Field(default_factory=list)
-    scorecards: List[ScorecardRead] = Field(default_factory=list)
+    scorecards: List[Dict[str, Any]] = Field(default_factory=list)
     messages: List[MessageRead] = Field(default_factory=list)
     interviews: List[InterviewRead] = Field(default_factory=list)
     scheduling_links: List[SchedulingLinkRead] = Field(default_factory=list)
